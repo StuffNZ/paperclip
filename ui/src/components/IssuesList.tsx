@@ -9,6 +9,7 @@ import { issuesApi } from "../api/issues";
 import { authApi } from "../api/auth";
 import { instanceSettingsApi } from "../api/instanceSettings";
 import { queryKeys } from "../lib/queryKeys";
+import { useIssueExternalObjectSummaries } from "../hooks/useIssueExternalObjects";
 import {
   shouldBlurPageSearchOnEnter,
   shouldBlurPageSearchOnEscape,
@@ -995,6 +996,15 @@ export function IssuesList({
     issueFilterWorkspaceContext,
   ]);
 
+  const issueIdsForExternalObjectSummaries = useMemo(
+    () => (viewState.viewMode === "list" ? filtered.map((issue) => issue.id) : []),
+    [filtered, viewState.viewMode],
+  );
+  const { summaries: externalObjectSummaryByIssueId } = useIssueExternalObjectSummaries(
+    selectedCompanyId,
+    issueIdsForExternalObjectSummaries,
+  );
+
   const progressSummary = useMemo(
     () => shouldRenderSubIssueProgressSummary(showProgressSummary, issues.length)
       ? buildSubIssueProgressSummary(issues)
@@ -1749,6 +1759,7 @@ export function IssuesList({
                         checklistDependencyChips={checklistDependencyChips}
                         checklistRowId={checklistRowId}
                         titleClassName={doneRowTitleClass}
+                        externalObjectSummary={externalObjectSummaryByIssueId.get(issue.id) ?? null}
                         titleSuffix={(
                           <>
                             {hasChildren && !isExpanded ? (

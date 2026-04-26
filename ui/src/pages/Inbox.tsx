@@ -25,6 +25,7 @@ import { useGeneralSettings } from "../context/GeneralSettingsContext";
 import { useSidebar } from "../context/SidebarContext";
 import { queryKeys } from "../lib/queryKeys";
 import { useDialogActions } from "../context/DialogContext";
+import { useIssueExternalObjectSummaries } from "../hooks/useIssueExternalObjects";
 import {
   applyIssueFilters,
   countActiveIssueFilters,
@@ -1276,6 +1277,20 @@ export function Inbox() {
     if (!defaults) return;
     openNewIssue(defaults);
   }, [groupBy, inboxWorkspaceGrouping, openNewIssue]);
+
+  const inboxIssueIdsForExternalObjectSummaries = useMemo(() => {
+    const issueIds = new Set<string>();
+    for (const section of groupedSections) {
+      for (const item of section.displayItems) {
+        if (item.kind === "issue") issueIds.add(item.issue.id);
+      }
+    }
+    return [...issueIds];
+  }, [groupedSections]);
+  const { summaries: externalObjectSummaryByIssueId } = useIssueExternalObjectSummaries(
+    selectedCompanyId,
+    inboxIssueIdsForExternalObjectSummaries,
+  );
   const totalVisibleWorkItems = useMemo(
     () => groupedSections.reduce((count, group) => count + group.displayItems.length, 0),
     [groupedSections],
@@ -2334,6 +2349,7 @@ export function Inbox() {
                       key={`issue:${issue.id}`}
                       issue={issue}
                       issueLinkState={issueLinkState}
+                      externalObjectSummary={externalObjectSummaryByIssueId.get(issue.id) ?? null}
                       selected={selected}
                       className={
                         isArchiving
