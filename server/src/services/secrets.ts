@@ -227,6 +227,13 @@ function canonicalizeBinding(binding: EnvBinding): CanonicalEnvBinding {
   if (binding.type === "plain") {
     return { type: "plain", value: String(binding.value) };
   }
+  if (binding.type === "oauth_token") {
+    // Stub: oauth_token binding resolution is wired up in Task 29 of the
+    // OAuth backbone plan (lazy refresh + connection lookup + decrypted
+    // access token return). Until then, surface a clear error so callers
+    // know this code path is intentionally unimplemented.
+    throw new Error("oauth_token binding resolution not yet implemented (Task 29)");
+  }
   return {
     type: "secret_ref",
     secretId: binding.secretId,
