@@ -360,6 +360,10 @@ export function createKubernetesExecutionDriver(deps: KubernetesDriverDeps): Kub
 
       let jobName = `agent-${agentSlug}-run-${runUlid}`;
       let jobUid = "";
+      // Tracks whether the Secret has an OwnerReference back to the Job. When
+      // false at the end of the run, the finally block below explicitly
+      // deletes the Secret because Kubernetes GC won't touch it.
+      let ownerRefPatched = false;
 
       try {
         // 4. Create the Job referencing the Secret.
@@ -390,16 +394,33 @@ export function createKubernetesExecutionDriver(deps: KubernetesDriverDeps): Kub
         jobUid = created.uid;
 
         // 5. Patch the Secret with the now-known Job UID so it gets GC'd
-        //    automatically when the Job is deleted.
-        try {
-          await patchEphemeralSecretOwnerReference(client, namespace, secretName, {
-            name: jobName,
-            uid: jobUid,
-          });
-        } catch {
-          // Owner-reference patching is best-effort; TTLSecondsAfterFinished
-          // still GCs the Job (and the Secret leaks for at most TTL seconds
-          // beyond Job termination). Not fatal.
+        //    automatically when the Job is deleted. Without the OwnerReference,
+        //    TTLSecondsAfterFinished only deletes the Job — the Secret would
+        //    persist indefinitely on long-lived clusters, accumulating spent
+        //    bootstrap tokens. Retry transient failures with exponential
+        //    backoff before falling back to a deferred delete in the finally
+        //    block below.
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            await patchEphemeralSecretOwnerReference(client, namespace, secretName, {
+              name: jobName,
+              uid: jobUid,
+            });
+            ownerRefPatched = true;
+            break;
+          } catch (patchErr) {
+            if (attempt === 2) {
+              // Final attempt failed — log structured error so operators see
+              // the leak path even if the cleanup below fails too.
+              // eslint-disable-next-line no-console
+              console.error("[k8s-execution] OwnerRef patch failed after 3 attempts; will delete Secret on cleanup", {
+                namespace, secretName, jobName, jobUid,
+                error: (patchErr as Error).message,
+              });
+            } else {
+              await waitMs(50 * Math.pow(2, attempt));
+            }
+          }
         }
       } catch (err) {
         // Job creation failed AFTER Secret creation — clean up the orphan.
@@ -483,6 +504,15 @@ export function createKubernetesExecutionDriver(deps: KubernetesDriverDeps): Kub
         await safeStop(logStream);
         await safeStop(eventWatch);
         cancellation.dispose();
+        // If the OwnerReference patch never succeeded, the Secret has no
+        // back-pointer to the Job and Kubernetes GC will never delete it
+        // (TTLSecondsAfterFinished only governs the Job itself). Delete it
+        // explicitly here. The bootstrap token has already been consumed at
+        // this point so deleting the Secret is safe even mid-run.
+        if (!ownerRefPatched) {
+          try { await deleteEphemeralSecret(client, namespace, secretName); }
+          catch { /* best-effort cleanup; log volume already covered above */ }
+        }
       }
 
       if (cancelled && !terminalJob) {

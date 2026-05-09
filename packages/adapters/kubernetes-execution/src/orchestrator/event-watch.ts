@@ -26,6 +26,7 @@ interface RawWatchEvent {
     type?: string;
     reason?: string;
     message?: string;
+    involvedObject?: { kind?: string; name?: string };
   };
 }
 
@@ -37,13 +38,26 @@ export function startEventWatch(input: StartEventWatchInput): EventWatchHandle {
   });
 
   const loop = async () => {
-    const fieldSelector = encodeURIComponent(`involvedObject.name=${input.jobName}`);
+    // No fieldSelector: a Kubernetes fieldSelector on Event only supports
+    // exact-match keys, so we cannot select Job-events AND Pod-events
+    // (which carry a generated name like `<jobName>-<hash>`) in a single
+    // watch. The most actionable failure events — OOMKilling, BackOff,
+    // ImagePullBackOff, Failed — are emitted against the Pod, not the Job,
+    // so a `involvedObject.name=<jobName>` filter silently dropped them and
+    // users debugging an OOM saw zero `[k8s]` output.
+    //
+    // We watch all events in the tenant namespace (which is exclusively
+    // Paperclip-managed) and filter in-code by involvedObject:
+    //   - kind=Job   AND name === jobName
+    //   - kind=Pod   AND name starts with `<jobName>-`  (Job-spawned pod naming)
+    // The volume is bounded by the namespace's own pod count and is well
+    // within reasonable streaming overhead.
     let resourceVersion = "0";
     while (!controller.signal.aborted) {
       try {
         const path =
           `/api/v1/namespaces/${encodeURIComponent(input.namespace)}/events` +
-          `?watch=true&fieldSelector=${fieldSelector}&resourceVersion=${resourceVersion}`;
+          `?watch=true&resourceVersion=${resourceVersion}`;
         const res = await input.client.requestStream("GET", path);
         if (!res.ok || !res.body) break;
         const reader = res.body.getReader();
@@ -62,12 +76,18 @@ export function startEventWatch(input: StartEventWatchInput): EventWatchHandle {
               if (evt.object.metadata?.resourceVersion) {
                 resourceVersion = evt.object.metadata.resourceVersion;
               }
-              if (evt.object.type === "Warning") {
-                await input.onLog(
-                  "stdout",
-                  `[k8s] ${evt.object.reason ?? "Warning"}: ${evt.object.message ?? ""}`,
-                );
-              }
+              if (evt.object.type !== "Warning") continue;
+              const involved = evt.object.involvedObject;
+              const matchesJob = involved?.kind === "Job" && involved?.name === input.jobName;
+              const matchesPod =
+                involved?.kind === "Pod" &&
+                typeof involved?.name === "string" &&
+                involved.name.startsWith(`${input.jobName}-`);
+              if (!matchesJob && !matchesPod) continue;
+              await input.onLog(
+                "stdout",
+                `[k8s] ${evt.object.reason ?? "Warning"}: ${evt.object.message ?? ""}`,
+              );
             } catch {
               /* skip malformed line — partial JSON, recoverable */
             }
