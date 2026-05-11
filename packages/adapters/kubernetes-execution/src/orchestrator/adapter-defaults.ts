@@ -53,8 +53,20 @@ export const ADAPTER_DEFAULTS: Record<string, AdapterDefaults> = {
   },
   opencode_local: {
     runtimeImage: `${REGISTRY_BASE}/agent-runtime-opencode`,
-    envKeys: ["OPENAI_API_KEY"],
-    allowFqdns: ["api.openai.com"],
+    // opencode supports multiple LLM providers (Anthropic, OpenAI, Gemini,
+    // xAI). driver.run() filters adapterEnv strictly to defaults.envKeys
+    // before writing the per-Job Secret, so a key not listed here is
+    // silently dropped — the pod then starts with no provider credentials
+    // and fails at the authentication step. Mirror pi_local's broader
+    // surface and include the matching FQDNs so the tenant NetworkPolicy
+    // permits egress.
+    envKeys: ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "XAI_API_KEY"],
+    allowFqdns: [
+      "api.anthropic.com",
+      "api.openai.com",
+      "generativelanguage.googleapis.com",
+      "api.x.ai",
+    ],
   },
   pi_local: {
     runtimeImage: `${REGISTRY_BASE}/agent-runtime-pi`,

@@ -55,11 +55,31 @@ describe("adapter defaults registry", () => {
     expect(d.allowFqdns).toEqual(expect.arrayContaining(["api.anthropic.com", "api.openai.com"]));
   });
 
-  it("opencode_local has expected env + fqdn defaults", () => {
+  it("opencode_local lists every provider it supports + their FQDNs", () => {
+    // opencode supports Anthropic, OpenAI, Gemini, and xAI. driver.run()
+    // filters adapterEnv strictly to defaults.envKeys before writing the
+    // per-Job Secret, so a missing key is silently dropped and the pod
+    // starts without credentials. Likewise allowFqdns gates the tenant
+    // NetworkPolicy. Asserting all four here prevents a regression that
+    // would only surface as an auth failure on a live cluster.
     const d = getAdapterDefaults("opencode_local");
     expect(d.runtimeImage).toMatch(/agent-runtime-opencode/);
-    expect(d.envKeys).toContain("OPENAI_API_KEY");
-    expect(d.allowFqdns).toContain("api.openai.com");
+    expect(d.envKeys).toEqual(
+      expect.arrayContaining([
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "XAI_API_KEY",
+      ]),
+    );
+    expect(d.allowFqdns).toEqual(
+      expect.arrayContaining([
+        "api.anthropic.com",
+        "api.openai.com",
+        "generativelanguage.googleapis.com",
+        "api.x.ai",
+      ]),
+    );
   });
 
   it("pi_local has expected env + fqdn defaults", () => {

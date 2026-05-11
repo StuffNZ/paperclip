@@ -290,10 +290,9 @@ export async function createApp(
   // is unset so existing deployments without k8s execution continue to boot.
   //
   // The router exposes a `dispose()` hook to quit its Redis client; we surface
-  // it on `app.locals.disposeK8sCallback` so a future graceful-shutdown handler
-  // can drain it. Wiring it into the existing `process.once("exit")` collector
-  // is a follow-up — that collector is sync and `redis.quit()` returns a
-  // Promise, so doing it correctly needs `beforeExit` or an async drain loop.
+  // it on `app.locals.disposeK8sCallback` and the SIGINT/SIGTERM handler in
+  // index.ts awaits it before process.exit. redis@4 keeps an internal
+  // reconnect timer that otherwise prevents a clean event-loop drain.
   if (process.env.PAPERCLIP_RUN_JWT_SECRET?.trim()) {
     const k8sRouter = await k8sCallbackRoutes(db);
     api.use(k8sRouter);

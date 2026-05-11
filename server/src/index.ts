@@ -988,6 +988,21 @@ export async function startServer(): Promise<StartedServer> {
         await telemetryClient.flush();
       }
 
+      // Drain the K8s callback router's Redis client. redis@4 keeps an
+      // internal reconnect timer that holds the event loop open, so a clean
+      // shutdown needs an explicit quit() before process.exit. The dispose
+      // hook is published on app.locals by createApp when
+      // PAPERCLIP_RUN_JWT_SECRET is set; absent for deployments without K8s
+      // execution.
+      const disposeK8s = (app.locals as Record<string, unknown>)["disposeK8sCallback"];
+      if (typeof disposeK8s === "function") {
+        try {
+          await (disposeK8s as () => Promise<void>)();
+        } catch (err) {
+          logger.error({ err }, "Failed to dispose K8s callback router cleanly");
+        }
+      }
+
       if (embeddedPostgres && embeddedPostgresStartedByThisProcess) {
         logger.info({ signal }, "Stopping embedded PostgreSQL");
         try {
