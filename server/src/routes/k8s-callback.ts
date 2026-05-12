@@ -77,6 +77,19 @@ function bearer(req: Request): string | undefined {
   return a ?? undefined;
 }
 
+export function runEventsRateLimitKey(input: {
+  authorization?: string;
+  clientIp: string;
+  runJwt: RunJwtService;
+}): string {
+  const auth = input.authorization;
+  if (auth?.startsWith("Bearer ")) {
+    const verified = input.runJwt.verify(auth.slice("Bearer ".length));
+    if (verified.ok) return `run:${verified.claims.runId}`;
+  }
+  return `ip:${input.clientIp}`;
+}
+
 /**
  * Append a run event from an authenticated agent shim into heartbeat_run_events.
  * Looks up the run row to learn agentId/companyId, then inserts at next seq.
@@ -290,7 +303,12 @@ export async function k8sCallbackRoutes(db: Db, options: K8sCallbackRoutesOption
   router.post("/runs/:runId/events", async (req: Request, res: Response) => {
     const rawRunId = req.params.runId;
     const runId = typeof rawRunId === "string" ? rawRunId : "";
-    const limit = await eventsLimiter.consume(`run:${runId}`);
+    const authorization = bearer(req);
+    const limit = await eventsLimiter.consume(runEventsRateLimitKey({
+      authorization,
+      clientIp: clientIp(req),
+      runJwt,
+    }));
     if (!limit.allowed) {
       res
         .status(429)
@@ -301,7 +319,7 @@ export async function k8sCallbackRoutes(db: Db, options: K8sCallbackRoutesOption
     try {
       const result = await eventsHandler({
         params: { runId },
-        headers: { authorization: bearer(req) },
+        headers: { authorization },
         body: (req.body ?? {}) as Record<string, unknown> & { type?: string; ts?: string },
       });
       if (result.body === undefined) {

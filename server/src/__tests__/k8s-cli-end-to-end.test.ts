@@ -27,6 +27,7 @@ import { clusterTenantPoliciesService } from "../services/cluster-tenant-policie
 import { clusterNamespaceBindingsService } from "../services/cluster-namespace-bindings.js";
 import { createExecutionTargetRegistry } from "../adapters/execution-target-registry.js";
 import { registerKubernetesExecutionTargetDriver } from "../adapters/execution-targets/kubernetes.js";
+import { deriveNamespaceName } from "@paperclipai/execution-target-kubernetes";
 
 // ---------------------------------------------------------------------------
 // Inline kind harness (mirrors packages/adapters/kubernetes-execution/test/integration/_harness.ts)
@@ -131,7 +132,12 @@ describe("M1 end-to-end smoke (CLI services + kind)", () => {
         adapterAllowFqdns: [],
         imagePullDockerConfigJson: null,
       });
-      expect(result.namespace).toBe("paperclip-acme-corp");
+      const expectedNamespace = deriveNamespaceName({
+        companySlug: "acme-corp",
+        companyId,
+        prefix: "paperclip-",
+      });
+      expect(result.namespace).toBe(expectedNamespace);
       expect(result.ciliumApplied).toBe(false);
 
       // 5. Record the namespace binding (what the CLI does after ensure-tenant).
@@ -144,7 +150,7 @@ describe("M1 end-to-end smoke (CLI services + kind)", () => {
       // 6. Verify by reading the binding back from DB.
       const binding = await bindings.getByClusterAndCompany(conn.id, companyId);
       expect(binding).not.toBeNull();
-      expect(binding!.namespaceName).toBe("paperclip-acme-corp");
+      expect(binding!.namespaceName).toBe(expectedNamespace);
 
       // 7. Verify the tenant policy get path returns null (no policy seeded).
       const tp = await tps.get(conn.id, companyId);
@@ -170,7 +176,7 @@ describe("M1 end-to-end smoke (CLI services + kind)", () => {
         namespaceName: result2.namespace,
       });
       const binding2 = await bindings.getByClusterAndCompany(conn.id, companyId);
-      expect(binding2!.namespaceName).toBe("paperclip-acme-corp");
+      expect(binding2!.namespaceName).toBe(expectedNamespace);
     },
     240_000,
   );

@@ -306,10 +306,11 @@ describe("KubernetesExecutionDriver.run()", () => {
     const { client, calls } = buildFakeClient(scenario);
     installFakeApiClient(client);
 
+    const mint = vi.fn(async () => ({ token: "bst_x", expiresAt: new Date(Date.now() + 600_000) }));
     const driver = createKubernetesExecutionDriver({
       resolveConnection: async () => ({ ...sampleConnection, allowAgentImageOverride: true }),
       bootstrapTokenMinter: {
-        mint: async () => ({ token: "bst_x", expiresAt: new Date(Date.now() + 600_000) }),
+        mint,
       },
       resolveRunContext: async () => baseRunContext,
       pollIntervalMs: 5,
@@ -318,6 +319,8 @@ describe("KubernetesExecutionDriver.run()", () => {
     const result = await driver.run({ ctx: makeCtx({ runtimeCommandSpec: null }), target });
 
     expect(result.errorCode).toBe("execution_target_not_yet_supported");
+    expect(mint).not.toHaveBeenCalled();
+    expect(calls.createdPvc).toBeNull();
     expect(calls.createdSecret).toBeNull();
     expect(calls.createdJob).toBeNull();
   });

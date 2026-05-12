@@ -366,6 +366,18 @@ export function createKubernetesExecutionDriver(deps: KubernetesDriverDeps): Kub
         }
       }
 
+      const runtimeCommandSpecJson = serializeRuntimeCommandSpec(ctx.runtimeCommandSpec);
+      if (!runtimeCommandSpecJson) {
+        cancellation.dispose();
+        return {
+          exitCode: null,
+          signal: null,
+          timedOut: false,
+          errorCode: "execution_target_not_yet_supported",
+          errorMessage: `Adapter ${ctx.agent.adapterType ?? "unknown"} did not provide a runtime command spec for kubernetes execution`,
+        };
+      }
+
       // 1. PVC (idempotent — reused across runs for the same agent).
       const pvc = buildAgentWorkspacePvc({
         namespace,
@@ -387,17 +399,6 @@ export function createKubernetesExecutionDriver(deps: KubernetesDriverDeps): Kub
         jobUid: "",
         ttlSeconds: DEFAULT_BOOTSTRAP_TTL_SECONDS,
       });
-      const runtimeCommandSpecJson = serializeRuntimeCommandSpec(ctx.runtimeCommandSpec);
-      if (!runtimeCommandSpecJson) {
-        cancellation.dispose();
-        return {
-          exitCode: null,
-          signal: null,
-          timedOut: false,
-          errorCode: "execution_target_not_yet_supported",
-          errorMessage: `Adapter ${ctx.agent.adapterType ?? "unknown"} did not provide a runtime command spec for kubernetes execution`,
-        };
-      }
 
       // 3. Materialize per-Job ephemeral Secret. We create it WITHOUT an
       //    OwnerReference first because the Job UID isn't known yet, then

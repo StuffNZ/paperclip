@@ -994,7 +994,7 @@ export async function startServer(): Promise<StartedServer> {
       // hook is published on app.locals by createApp when
       // PAPERCLIP_RUN_JWT_SECRET is set; absent for deployments without K8s
       // execution.
-      const disposeK8s = (app.locals as Record<string, unknown>)["disposeK8sCallback"];
+      const disposeK8s = (app.locals as Record<string, unknown> | undefined)?.["disposeK8sCallback"];
       if (typeof disposeK8s === "function") {
         try {
           await (disposeK8s as () => Promise<void>)();

@@ -48,8 +48,8 @@ describe("issueGitCredentials", () => {
 
   it("returns the decoded {username, password} when the secret resolves", async () => {
     const secretRows = await db.execute(sql`
-      INSERT INTO company_secrets (company_id, name)
-      VALUES (${companyId}, 'github-pat')
+      INSERT INTO company_secrets (company_id, key, name)
+      VALUES (${companyId}, 'github-pat', 'github-pat')
       RETURNING id
     `);
     const secretId = (secretRows[0] as { id: string }).id;
@@ -78,8 +78,8 @@ describe("issueGitCredentials", () => {
 
   it("returns internal_error when the secret material is not valid JSON", async () => {
     const secretRows = await db.execute(sql`
-      INSERT INTO company_secrets (company_id, name)
-      VALUES (${companyId}, 'broken-pat')
+      INSERT INTO company_secrets (company_id, key, name)
+      VALUES (${companyId}, 'broken-pat', 'broken-pat')
       RETURNING id
     `);
     const secretId = (secretRows[0] as { id: string }).id;
@@ -101,8 +101,8 @@ describe("issueGitCredentials", () => {
 
   it("returns internal_error when JSON lacks string username/password", async () => {
     const secretRows = await db.execute(sql`
-      INSERT INTO company_secrets (company_id, name)
-      VALUES (${companyId}, 'shape-bad-pat')
+      INSERT INTO company_secrets (company_id, key, name)
+      VALUES (${companyId}, 'shape-bad-pat', 'shape-bad-pat')
       RETURNING id
     `);
     const secretId = (secretRows[0] as { id: string }).id;
