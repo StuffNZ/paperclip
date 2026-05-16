@@ -15,4 +15,13 @@ describe("parseGrokStdoutLine", () => {
       { kind: "system", ts, text: "stop_reason=EndTurn session=sess-1" },
     ]);
   });
+
+  it("surfaces structured Grok error payload text", () => {
+    expect(parseGrokStdoutLine(JSON.stringify({
+      type: "error",
+      error: { message: "Authentication required" },
+    }), ts)).toEqual([
+      { kind: "stderr", ts, text: "Authentication required" },
+    ]);
+  });
 });

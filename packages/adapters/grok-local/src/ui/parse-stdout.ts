@@ -17,6 +17,13 @@ function asString(value: unknown, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function extractErrorText(value: unknown): string {
+  if (typeof value === "string") return value;
+  const record = asRecord(value);
+  if (!record) return "";
+  return asString(record.message) || asString(record.detail) || asString(record.code);
+}
+
 export function parseGrokStdoutLine(line: string, ts: string): TranscriptEntry[] {
   const parsed = asRecord(safeJsonParse(line));
   if (!parsed) {
@@ -36,7 +43,7 @@ export function parseGrokStdoutLine(line: string, ts: string): TranscriptEntry[]
   }
 
   if (type === "error") {
-    const text = asString(parsed.data) || asString(parsed.message) || asString(parsed.error);
+    const text = asString(parsed.data) || asString(parsed.message) || extractErrorText(parsed.error);
     return text ? [{ kind: "stderr", ts, text }] : [{ kind: "stderr", ts, text: "Grok error" }];
   }
 

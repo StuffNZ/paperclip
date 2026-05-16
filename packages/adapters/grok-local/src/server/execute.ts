@@ -237,96 +237,47 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     desiredSkillNames: desiredGrokSkillNames,
     onLog,
   });
-
-  const envConfig = parseObject(config.env);
-  const hasExplicitApiKey =
-    typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
-  const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
-  env.PAPERCLIP_RUN_ID = runId;
-  const wakeTaskId =
-    (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
-    (typeof context.issueId === "string" && context.issueId.trim().length > 0 && context.issueId.trim()) ||
-    null;
-  const wakeReason =
-    typeof context.wakeReason === "string" && context.wakeReason.trim().length > 0
-      ? context.wakeReason.trim()
-      : null;
-  const wakeCommentId =
-    (typeof context.wakeCommentId === "string" && context.wakeCommentId.trim().length > 0 && context.wakeCommentId.trim()) ||
-    (typeof context.commentId === "string" && context.commentId.trim().length > 0 && context.commentId.trim()) ||
-    null;
-  const approvalId =
-    typeof context.approvalId === "string" && context.approvalId.trim().length > 0
-      ? context.approvalId.trim()
-      : null;
-  const approvalStatus =
-    typeof context.approvalStatus === "string" && context.approvalStatus.trim().length > 0
-      ? context.approvalStatus.trim()
-      : null;
-  const linkedIssueIds = Array.isArray(context.issueIds)
-    ? context.issueIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
-    : [];
-  const wakePayloadJson = stringifyPaperclipWakePayload(context.paperclipWake);
-  const issueWorkMode = readPaperclipIssueWorkModeFromContext(context);
-  if (wakeTaskId) env.PAPERCLIP_TASK_ID = wakeTaskId;
-  if (issueWorkMode) env.PAPERCLIP_ISSUE_WORK_MODE = issueWorkMode;
-  if (wakeReason) env.PAPERCLIP_WAKE_REASON = wakeReason;
-  if (wakeCommentId) env.PAPERCLIP_WAKE_COMMENT_ID = wakeCommentId;
-  if (approvalId) env.PAPERCLIP_APPROVAL_ID = approvalId;
-  if (approvalStatus) env.PAPERCLIP_APPROVAL_STATUS = approvalStatus;
-  if (linkedIssueIds.length > 0) env.PAPERCLIP_LINKED_ISSUE_IDS = linkedIssueIds.join(",");
-  if (wakePayloadJson) env.PAPERCLIP_WAKE_PAYLOAD_JSON = wakePayloadJson;
-  refreshPaperclipWorkspaceEnvForExecution({
-    env,
-    envConfig,
-    workspaceCwd: effectiveWorkspaceCwd,
-    workspaceSource,
-    workspaceId,
-    workspaceRepoUrl,
-    workspaceRepoRef,
-    workspaceHints,
-    agentHome,
-    executionTargetIsRemote,
-    executionCwd: effectiveExecutionCwd,
-  });
-  if (!hasExplicitApiKey && authToken) {
-    env.PAPERCLIP_API_KEY = authToken;
-  }
-
-  const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
-    executionTarget,
-    asNumber(config.timeoutSec, 0),
-  );
-  const graceSec = asNumber(config.graceSec, 20);
-  await ensureAdapterExecutionTargetRuntimeCommandInstalled({
-    runId,
-    target: executionTarget,
-    installCommand: ctx.runtimeCommandSpec?.installCommand,
-    detectCommand: ctx.runtimeCommandSpec?.detectCommand,
-    cwd,
-    env,
-    timeoutSec,
-    graceSec,
-    onLog,
-  });
-
   let restoreRemoteWorkspace: (() => Promise<void>) | null = null;
-  if (executionTargetIsRemote) {
-    await onLog(
-      "stdout",
-      `[paperclip] Syncing Grok workspace to ${describeAdapterExecutionTarget(executionTarget)}.\n`,
-    );
-    const preparedExecutionTargetRuntime = await prepareAdapterExecutionTargetRuntime({
-      runId,
-      target: executionTarget,
-      adapterKey: "grok",
-      workspaceLocalDir: cwd,
-      timeoutSec,
-      installCommand: ctx.runtimeCommandSpec?.installCommand ?? null,
-      detectCommand: ctx.runtimeCommandSpec?.detectCommand ?? command,
-    });
-    restoreRemoteWorkspace = () => preparedExecutionTargetRuntime.restoreWorkspace();
-    effectiveExecutionCwd = preparedExecutionTargetRuntime.workspaceRemoteDir ?? effectiveExecutionCwd;
+
+  try {
+    const envConfig = parseObject(config.env);
+    const hasExplicitApiKey =
+      typeof envConfig.PAPERCLIP_API_KEY === "string" && envConfig.PAPERCLIP_API_KEY.trim().length > 0;
+    const env: Record<string, string> = { ...buildPaperclipEnv(agent) };
+    env.PAPERCLIP_RUN_ID = runId;
+    const wakeTaskId =
+      (typeof context.taskId === "string" && context.taskId.trim().length > 0 && context.taskId.trim()) ||
+      (typeof context.issueId === "string" && context.issueId.trim().length > 0 && context.issueId.trim()) ||
+      null;
+    const wakeReason =
+      typeof context.wakeReason === "string" && context.wakeReason.trim().length > 0
+        ? context.wakeReason.trim()
+        : null;
+    const wakeCommentId =
+      (typeof context.wakeCommentId === "string" && context.wakeCommentId.trim().length > 0 && context.wakeCommentId.trim()) ||
+      (typeof context.commentId === "string" && context.commentId.trim().length > 0 && context.commentId.trim()) ||
+      null;
+    const approvalId =
+      typeof context.approvalId === "string" && context.approvalId.trim().length > 0
+        ? context.approvalId.trim()
+        : null;
+    const approvalStatus =
+      typeof context.approvalStatus === "string" && context.approvalStatus.trim().length > 0
+        ? context.approvalStatus.trim()
+        : null;
+    const linkedIssueIds = Array.isArray(context.issueIds)
+      ? context.issueIds.filter((value: unknown): value is string => typeof value === "string" && value.trim().length > 0)
+      : [];
+    const wakePayloadJson = stringifyPaperclipWakePayload(context.paperclipWake);
+    const issueWorkMode = readPaperclipIssueWorkModeFromContext(context);
+    if (wakeTaskId) env.PAPERCLIP_TASK_ID = wakeTaskId;
+    if (issueWorkMode) env.PAPERCLIP_ISSUE_WORK_MODE = issueWorkMode;
+    if (wakeReason) env.PAPERCLIP_WAKE_REASON = wakeReason;
+    if (wakeCommentId) env.PAPERCLIP_WAKE_COMMENT_ID = wakeCommentId;
+    if (approvalId) env.PAPERCLIP_APPROVAL_ID = approvalId;
+    if (approvalStatus) env.PAPERCLIP_APPROVAL_STATUS = approvalStatus;
+    if (linkedIssueIds.length > 0) env.PAPERCLIP_LINKED_ISSUE_IDS = linkedIssueIds.join(",");
+    if (wakePayloadJson) env.PAPERCLIP_WAKE_PAYLOAD_JSON = wakePayloadJson;
     refreshPaperclipWorkspaceEnvForExecution({
       env,
       envConfig,
@@ -340,224 +291,273 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
       executionTargetIsRemote,
       executionCwd: effectiveExecutionCwd,
     });
-  }
+    if (!hasExplicitApiKey && authToken) {
+      env.PAPERCLIP_API_KEY = authToken;
+    }
 
-  const runtimeExecutionTarget = overrideAdapterExecutionTargetRemoteCwd(executionTarget, effectiveExecutionCwd);
-  const effectiveEnv = Object.fromEntries(
-    Object.entries({ ...process.env, ...env }).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string",
-    ),
-  );
-  const runtimeEnv = ensurePathInEnv(effectiveEnv);
-  await ensureAdapterExecutionTargetCommandResolvable(command, executionTarget, cwd, runtimeEnv, {
-    installCommand: ctx.runtimeCommandSpec?.installCommand ?? null,
-    timeoutSec,
-  });
-  const resolvedCommand = await resolveAdapterExecutionTargetCommandForLogs(command, executionTarget, cwd, runtimeEnv);
-  const loggedEnv = buildInvocationEnvForLogs(env, {
-    runtimeEnv,
-    includeRuntimeKeys: ["HOME"],
-    resolvedCommand,
-  });
-  const billingType = resolveBillingType(effectiveEnv);
-
-  const runtimeSessionParams = parseObject(runtime.sessionParams);
-  const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
-  const runtimeSessionCwd = asString(runtimeSessionParams.cwd, "");
-  const runtimeRemoteExecution = parseObject(runtimeSessionParams.remoteExecution);
-  const canResumeSession =
-    runtimeSessionId.length > 0 &&
-    (runtimeSessionCwd.length === 0 || path.resolve(runtimeSessionCwd) === path.resolve(effectiveExecutionCwd)) &&
-    adapterExecutionTargetSessionMatches(runtimeRemoteExecution, runtimeExecutionTarget);
-  const sessionId = canResumeSession ? runtimeSessionId : null;
-  if (executionTargetIsRemote && runtimeSessionId && !canResumeSession) {
-    await onLog(
-      "stdout",
-      `[paperclip] Grok session "${runtimeSessionId}" does not match the current remote execution identity and will not be resumed in "${effectiveExecutionCwd}". Starting a fresh remote session.\n`,
+    const timeoutSec = resolveAdapterExecutionTargetTimeoutSec(
+      executionTarget,
+      asNumber(config.timeoutSec, 0),
     );
-  } else if (runtimeSessionId && !canResumeSession) {
-    await onLog(
-      "stdout",
-      `[paperclip] Grok session "${runtimeSessionId}" was saved for cwd "${runtimeSessionCwd}" and will not be resumed in "${effectiveExecutionCwd}".\n`,
-    );
-  }
-
-  const commandNotes = (() => {
-    const notes: string[] = ["Prompt is passed to Grok via --single in headless mode."];
-    if (alwaysApprove) notes.push("Added --always-approve for unattended execution.");
-    if (stagedAssets.stagedInstructionsPath) {
-      notes.push(`Staged project instructions at ${stagedAssets.stagedInstructionsPath} for native Grok discovery.`);
-    }
-    if (stagedAssets.rulesFilePath) {
-      notes.push(`Applied fallback instructions via --rules @${stagedAssets.rulesFilePath}.`);
-    }
-    if (stagedAssets.stagedSkillsCount > 0) {
-      notes.push(`Staged ${stagedAssets.stagedSkillsCount} Paperclip skill(s) into .claude/skills for native Grok discovery.`);
-    }
-    return notes;
-  })();
-
-  const templateData = {
-    agentId: agent.id,
-    companyId: agent.companyId,
-    runId,
-    company: { id: agent.companyId },
-    agent,
-    run: { id: runId, source: "on_demand" },
-    context,
-  };
-  const wakePrompt = renderPaperclipWakePrompt(context.paperclipWake, { resumedSession: Boolean(sessionId) });
-  const shouldUseResumeDeltaPrompt = Boolean(sessionId) && wakePrompt.length > 0;
-  const renderedPrompt = shouldUseResumeDeltaPrompt ? "" : renderTemplate(promptTemplate, templateData);
-  const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
-  const paperclipEnvNote = renderPaperclipEnvNote(env);
-  const apiAccessNote = renderApiAccessNote(env);
-  const prompt = joinPromptSections([
-    wakePrompt,
-    sessionHandoffNote,
-    paperclipEnvNote,
-    apiAccessNote,
-    renderedPrompt,
-  ]);
-  const promptMetrics = {
-    promptChars: prompt.length,
-    wakePromptChars: wakePrompt.length,
-    sessionHandoffChars: sessionHandoffNote.length,
-    runtimeNoteChars: paperclipEnvNote.length + apiAccessNote.length,
-    heartbeatPromptChars: renderedPrompt.length,
-  };
-
-  const buildArgs = (resumeSessionId: string | null) => {
-    const args = ["--cwd", effectiveExecutionCwd, "--output-format", "streaming-json"];
-    if (resumeSessionId) args.push("--resume", resumeSessionId);
-    if (model && model !== DEFAULT_GROK_LOCAL_MODEL) args.push("--model", model);
-    if (reasoningEffort) args.push("--reasoning-effort", reasoningEffort);
-    if (maxTurns > 0) args.push("--max-turns", String(maxTurns));
-    if (permissionMode) args.push("--permission-mode", permissionMode);
-    if (alwaysApprove) args.push("--always-approve");
-    if (disableWebSearch) args.push("--disable-web-search");
-    if (stagedAssets.rulesFilePath) args.push("--rules", `@${stagedAssets.rulesFilePath}`);
-    const extraArgs = (() => {
-      const fromExtraArgs = asStringArray(config.extraArgs);
-      if (fromExtraArgs.length > 0) return fromExtraArgs;
-      return asStringArray(config.args);
-    })();
-    if (extraArgs.length > 0) args.push(...extraArgs);
-    args.push("--single", prompt);
-    return args;
-  };
-
-  const runAttempt = async (resumeSessionId: string | null) => {
-    const args = buildArgs(resumeSessionId);
-    if (onMeta) {
-      await onMeta({
-        adapterType: "grok_local",
-        command: resolvedCommand,
-        cwd: effectiveExecutionCwd,
-        commandNotes,
-        commandArgs: args.map((value, index) => (
-          index === args.length - 1 ? `<prompt ${prompt.length} chars>` : value
-        )),
-        env: loggedEnv,
-        prompt,
-        promptMetrics,
-        context,
-      });
-    }
-
-    const proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
+    const graceSec = asNumber(config.graceSec, 20);
+    await ensureAdapterExecutionTargetRuntimeCommandInstalled({
+      runId,
+      target: executionTarget,
+      installCommand: ctx.runtimeCommandSpec?.installCommand,
+      detectCommand: ctx.runtimeCommandSpec?.detectCommand,
       cwd,
       env,
       timeoutSec,
       graceSec,
-      onSpawn,
       onLog,
     });
-    return {
-      proc,
-      parsed: parseGrokJsonl(proc.stdout),
-    };
-  };
 
-  const toResult = (
-    attempt: {
-      proc: {
-        exitCode: number | null;
-        signal: string | null;
-        timedOut: boolean;
-        stdout: string;
-        stderr: string;
+    if (executionTargetIsRemote) {
+      await onLog(
+        "stdout",
+        `[paperclip] Syncing Grok workspace to ${describeAdapterExecutionTarget(executionTarget)}.\n`,
+      );
+      const preparedExecutionTargetRuntime = await prepareAdapterExecutionTargetRuntime({
+        runId,
+        target: executionTarget,
+        adapterKey: "grok",
+        workspaceLocalDir: cwd,
+        timeoutSec,
+        installCommand: ctx.runtimeCommandSpec?.installCommand ?? null,
+        detectCommand: ctx.runtimeCommandSpec?.detectCommand ?? command,
+      });
+      restoreRemoteWorkspace = () => preparedExecutionTargetRuntime.restoreWorkspace();
+      effectiveExecutionCwd = preparedExecutionTargetRuntime.workspaceRemoteDir ?? effectiveExecutionCwd;
+      refreshPaperclipWorkspaceEnvForExecution({
+        env,
+        envConfig,
+        workspaceCwd: effectiveWorkspaceCwd,
+        workspaceSource,
+        workspaceId,
+        workspaceRepoUrl,
+        workspaceRepoRef,
+        workspaceHints,
+        agentHome,
+        executionTargetIsRemote,
+        executionCwd: effectiveExecutionCwd,
+      });
+    }
+
+    const runtimeExecutionTarget = overrideAdapterExecutionTargetRemoteCwd(executionTarget, effectiveExecutionCwd);
+    const effectiveEnv = Object.fromEntries(
+      Object.entries({ ...process.env, ...env }).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
+    const runtimeEnv = ensurePathInEnv(effectiveEnv);
+    await ensureAdapterExecutionTargetCommandResolvable(command, executionTarget, cwd, runtimeEnv, {
+      installCommand: ctx.runtimeCommandSpec?.installCommand ?? null,
+      timeoutSec,
+    });
+    const resolvedCommand = await resolveAdapterExecutionTargetCommandForLogs(command, executionTarget, cwd, runtimeEnv);
+    const loggedEnv = buildInvocationEnvForLogs(env, {
+      runtimeEnv,
+      includeRuntimeKeys: ["HOME"],
+      resolvedCommand,
+    });
+    const billingType = resolveBillingType(effectiveEnv);
+
+    const runtimeSessionParams = parseObject(runtime.sessionParams);
+    const runtimeSessionId = asString(runtimeSessionParams.sessionId, runtime.sessionId ?? "");
+    const runtimeSessionCwd = asString(runtimeSessionParams.cwd, "");
+    const runtimeRemoteExecution = parseObject(runtimeSessionParams.remoteExecution);
+    const canResumeSession =
+      runtimeSessionId.length > 0 &&
+      (runtimeSessionCwd.length === 0 || path.resolve(runtimeSessionCwd) === path.resolve(effectiveExecutionCwd)) &&
+      adapterExecutionTargetSessionMatches(runtimeRemoteExecution, runtimeExecutionTarget);
+    const sessionId = canResumeSession ? runtimeSessionId : null;
+    if (executionTargetIsRemote && runtimeSessionId && !canResumeSession) {
+      await onLog(
+        "stdout",
+        `[paperclip] Grok session "${runtimeSessionId}" does not match the current remote execution identity and will not be resumed in "${effectiveExecutionCwd}". Starting a fresh remote session.\n`,
+      );
+    } else if (runtimeSessionId && !canResumeSession) {
+      await onLog(
+        "stdout",
+        `[paperclip] Grok session "${runtimeSessionId}" was saved for cwd "${runtimeSessionCwd}" and will not be resumed in "${effectiveExecutionCwd}".\n`,
+      );
+    }
+
+    const commandNotes = (() => {
+      const notes: string[] = ["Prompt is passed to Grok via --single in headless mode."];
+      if (alwaysApprove) notes.push("Added --always-approve for unattended execution.");
+      if (stagedAssets.stagedInstructionsPath) {
+        notes.push(`Staged project instructions at ${stagedAssets.stagedInstructionsPath} for native Grok discovery.`);
+      }
+      if (stagedAssets.rulesFilePath) {
+        notes.push(`Applied fallback instructions via --rules @${stagedAssets.rulesFilePath}.`);
+      }
+      if (stagedAssets.stagedSkillsCount > 0) {
+        notes.push(`Staged ${stagedAssets.stagedSkillsCount} Paperclip skill(s) into .claude/skills for native Grok discovery.`);
+      }
+      return notes;
+    })();
+
+    const templateData = {
+      agentId: agent.id,
+      companyId: agent.companyId,
+      runId,
+      company: { id: agent.companyId },
+      agent,
+      run: { id: runId, source: "on_demand" },
+      context,
+    };
+    const wakePrompt = renderPaperclipWakePrompt(context.paperclipWake, { resumedSession: Boolean(sessionId) });
+    const shouldUseResumeDeltaPrompt = Boolean(sessionId) && wakePrompt.length > 0;
+    const renderedPrompt = shouldUseResumeDeltaPrompt ? "" : renderTemplate(promptTemplate, templateData);
+    const sessionHandoffNote = asString(context.paperclipSessionHandoffMarkdown, "").trim();
+    const paperclipEnvNote = renderPaperclipEnvNote(env);
+    const apiAccessNote = renderApiAccessNote(env);
+    const prompt = joinPromptSections([
+      wakePrompt,
+      sessionHandoffNote,
+      paperclipEnvNote,
+      apiAccessNote,
+      renderedPrompt,
+    ]);
+    const promptMetrics = {
+      promptChars: prompt.length,
+      wakePromptChars: wakePrompt.length,
+      sessionHandoffChars: sessionHandoffNote.length,
+      runtimeNoteChars: paperclipEnvNote.length + apiAccessNote.length,
+      heartbeatPromptChars: renderedPrompt.length,
+    };
+
+    const buildArgs = (resumeSessionId: string | null) => {
+      const args = ["--cwd", effectiveExecutionCwd, "--output-format", "streaming-json"];
+      if (resumeSessionId) args.push("--resume", resumeSessionId);
+      if (model && model !== DEFAULT_GROK_LOCAL_MODEL) args.push("--model", model);
+      if (reasoningEffort) args.push("--reasoning-effort", reasoningEffort);
+      if (maxTurns > 0) args.push("--max-turns", String(maxTurns));
+      if (permissionMode) args.push("--permission-mode", permissionMode);
+      if (alwaysApprove) args.push("--always-approve");
+      if (disableWebSearch) args.push("--disable-web-search");
+      if (stagedAssets.rulesFilePath) args.push("--rules", `@${stagedAssets.rulesFilePath}`);
+      const extraArgs = (() => {
+        const fromExtraArgs = asStringArray(config.extraArgs);
+        if (fromExtraArgs.length > 0) return fromExtraArgs;
+        return asStringArray(config.args);
+      })();
+      if (extraArgs.length > 0) args.push(...extraArgs);
+      args.push("--single", prompt);
+      return args;
+    };
+
+    const runAttempt = async (resumeSessionId: string | null) => {
+      const args = buildArgs(resumeSessionId);
+      if (onMeta) {
+        await onMeta({
+          adapterType: "grok_local",
+          command: resolvedCommand,
+          cwd: effectiveExecutionCwd,
+          commandNotes,
+          commandArgs: args.map((value, index) => (
+            index === args.length - 1 ? `<prompt ${prompt.length} chars>` : value
+          )),
+          env: loggedEnv,
+          prompt,
+          promptMetrics,
+          context,
+        });
+      }
+
+      const proc = await runAdapterExecutionTargetProcess(runId, runtimeExecutionTarget, command, args, {
+        cwd,
+        env,
+        timeoutSec,
+        graceSec,
+        onSpawn,
+        onLog,
+      });
+      return {
+        proc,
+        parsed: parseGrokJsonl(proc.stdout),
       };
-      parsed: ReturnType<typeof parseGrokJsonl>;
-    },
-    clearSessionOnMissingSession = false,
-    isRetry = false,
-  ): AdapterExecutionResult => {
-    if (attempt.proc.timedOut) {
+    };
+
+    const toResult = (
+      attempt: {
+        proc: {
+          exitCode: number | null;
+          signal: string | null;
+          timedOut: boolean;
+          stdout: string;
+          stderr: string;
+        };
+        parsed: ReturnType<typeof parseGrokJsonl>;
+      },
+      clearSessionOnMissingSession = false,
+      isRetry = false,
+    ): AdapterExecutionResult => {
+      if (attempt.proc.timedOut) {
+        return {
+          exitCode: attempt.proc.exitCode,
+          signal: attempt.proc.signal,
+          timedOut: true,
+          errorMessage: `Timed out after ${timeoutSec}s`,
+          clearSession: clearSessionOnMissingSession,
+        };
+      }
+
+      const failed = (attempt.proc.exitCode ?? 0) !== 0;
+      const parsedError = typeof attempt.parsed.errorMessage === "string" ? attempt.parsed.errorMessage.trim() : "";
+      const stderrLine = firstNonEmptyLine(attempt.proc.stderr);
+      const fallbackErrorMessage =
+        parsedError ||
+        stderrLine ||
+        `Grok exited with code ${attempt.proc.exitCode ?? -1}`;
+
+      const canFallbackToRuntimeSession = !isRetry;
+      const resolvedSessionId = attempt.parsed.sessionId
+        ?? (canFallbackToRuntimeSession ? (runtimeSessionId ?? runtime.sessionId ?? null) : null);
+      const resolvedSessionParams = resolvedSessionId
+        ? ({
+          sessionId: resolvedSessionId,
+          cwd: effectiveExecutionCwd,
+          ...(workspaceId ? { workspaceId } : {}),
+          ...(workspaceRepoUrl ? { repoUrl: workspaceRepoUrl } : {}),
+          ...(workspaceRepoRef ? { repoRef: workspaceRepoRef } : {}),
+          ...(executionTargetIsRemote
+            ? {
+                remoteExecution: adapterExecutionTargetSessionIdentity(runtimeExecutionTarget),
+              }
+            : {}),
+        } as Record<string, unknown>)
+        : null;
+
       return {
         exitCode: attempt.proc.exitCode,
         signal: attempt.proc.signal,
-        timedOut: true,
-        errorMessage: `Timed out after ${timeoutSec}s`,
-        clearSession: clearSessionOnMissingSession,
-      };
-    }
-
-    const failed = (attempt.proc.exitCode ?? 0) !== 0;
-    const parsedError = typeof attempt.parsed.errorMessage === "string" ? attempt.parsed.errorMessage.trim() : "";
-    const stderrLine = firstNonEmptyLine(attempt.proc.stderr);
-    const fallbackErrorMessage =
-      parsedError ||
-      stderrLine ||
-      `Grok exited with code ${attempt.proc.exitCode ?? -1}`;
-
-    const canFallbackToRuntimeSession = !isRetry;
-    const resolvedSessionId = attempt.parsed.sessionId
-      ?? (canFallbackToRuntimeSession ? (runtimeSessionId ?? runtime.sessionId ?? null) : null);
-    const resolvedSessionParams = resolvedSessionId
-      ? ({
+        timedOut: false,
+        errorMessage: failed ? fallbackErrorMessage : null,
+        usage: {
+          inputTokens: 0,
+          outputTokens: 0,
+          cachedInputTokens: 0,
+        },
         sessionId: resolvedSessionId,
-        cwd: effectiveExecutionCwd,
-        ...(workspaceId ? { workspaceId } : {}),
-        ...(workspaceRepoUrl ? { repoUrl: workspaceRepoUrl } : {}),
-        ...(workspaceRepoRef ? { repoRef: workspaceRepoRef } : {}),
-        ...(executionTargetIsRemote
-          ? {
-              remoteExecution: adapterExecutionTargetSessionIdentity(runtimeExecutionTarget),
-            }
-          : {}),
-      } as Record<string, unknown>)
-      : null;
-
-    return {
-      exitCode: attempt.proc.exitCode,
-      signal: attempt.proc.signal,
-      timedOut: false,
-      errorMessage: failed ? fallbackErrorMessage : null,
-      usage: {
-        inputTokens: 0,
-        outputTokens: 0,
-        cachedInputTokens: 0,
-      },
-      sessionId: resolvedSessionId,
-      sessionParams: resolvedSessionParams,
-      sessionDisplayId: resolvedSessionId,
-      provider: "xai",
-      biller: billingType === "api" ? "xai" : "grok",
-      model,
-      billingType,
-      costUsd: null,
-      resultJson: {
-        stopReason: attempt.parsed.stopReason,
-        requestId: attempt.parsed.requestId,
-        ...(failed ? { stderr: attempt.proc.stderr } : {}),
-      },
-      summary: attempt.parsed.summary,
-      clearSession: Boolean(clearSessionOnMissingSession && !resolvedSessionId),
+        sessionParams: resolvedSessionParams,
+        sessionDisplayId: resolvedSessionId,
+        provider: "xai",
+        biller: billingType === "api" ? "xai" : "grok",
+        model,
+        billingType,
+        costUsd: null,
+        resultJson: {
+          stopReason: attempt.parsed.stopReason,
+          requestId: attempt.parsed.requestId,
+          ...(failed ? { stderr: attempt.proc.stderr } : {}),
+        },
+        summary: attempt.parsed.summary,
+        clearSession: Boolean(clearSessionOnMissingSession && !resolvedSessionId),
+      };
     };
-  };
 
-  try {
     const initial = await runAttempt(sessionId);
     if (
       sessionId &&

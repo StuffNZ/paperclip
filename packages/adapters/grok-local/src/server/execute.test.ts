@@ -137,4 +137,51 @@ describe("grok_local execute", () => {
     expect(await pathExists(path.join(root, ".claude", "skills", "paperclip"))).toBe(false);
     expect(logs.map((entry) => entry.chunk)).not.toEqual([]);
   });
+
+  it("cleans up staged assets when setup fails before the Grok process starts", async () => {
+    const root = await makeTempRoot();
+    const instructionsPath = path.join(root, "managed", "AGENTS.md");
+    const skillSource = path.join(root, "runtime-skills", "paperclip");
+    await fs.mkdir(path.dirname(instructionsPath), { recursive: true });
+    await fs.writeFile(instructionsPath, "You are Grok.\n", "utf8");
+    await fs.mkdir(skillSource, { recursive: true });
+    await fs.writeFile(path.join(skillSource, "SKILL.md"), "---\nname: paperclip\ndescription: test\n---\n", "utf8");
+    ensureCommandMock.mockRejectedValueOnce(new Error("grok not installed"));
+
+    const ctx: AdapterExecutionContext = {
+      runId: "run-setup-fail",
+      agent: {
+        id: "agent-1",
+        companyId: "company-1",
+        name: "Grok Agent",
+        adapterType: "grok_local",
+        adapterConfig: {},
+      },
+      runtime: {
+        sessionId: null,
+        sessionParams: null,
+        sessionDisplayId: null,
+        taskKey: null,
+      },
+      config: {
+        cwd: root,
+        instructionsFilePath: instructionsPath,
+        paperclipRuntimeSkills: [{
+          key: "paperclip",
+          runtimeName: "paperclip",
+          source: skillSource,
+          required: false,
+        }],
+        paperclipSkillSync: { desiredSkills: ["paperclip"] },
+      },
+      context: {},
+      authToken: "run-token",
+      onLog: async () => {},
+    };
+
+    await expect(execute(ctx)).rejects.toThrow("grok not installed");
+    expect(runProcessMock).not.toHaveBeenCalled();
+    expect(await pathExists(path.join(root, "Agents.md"))).toBe(false);
+    expect(await pathExists(path.join(root, ".claude", "skills", "paperclip"))).toBe(false);
+  });
 });
