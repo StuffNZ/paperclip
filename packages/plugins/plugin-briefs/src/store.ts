@@ -300,6 +300,46 @@ export function createBriefsStore(db: PluginDatabaseClient) {
       );
     },
 
+    async loadPreferences(input: { companyId: string; userId: string }): Promise<BriefPreferences> {
+      const rows = await db.query<{
+        cadence: BriefPreferences["cadence"];
+        retention_days: number;
+        done_retention_hours: number;
+        stale_after_days: number;
+        max_unpinned_cards: number;
+        scope: BriefPreferences["scope"];
+      }>(
+        `SELECT cadence, retention_days, done_retention_hours, stale_after_days, max_unpinned_cards, scope
+         FROM ${preferencesTable}
+         WHERE company_id = $1 AND user_id = $2
+         LIMIT 1`,
+        [input.companyId, input.userId],
+      );
+      const row = rows[0];
+      if (!row) {
+        return {
+          companyId: input.companyId,
+          userId: input.userId,
+          cadence: "hourly",
+          retentionDays: 7,
+          doneRetentionHours: 72,
+          staleAfterDays: 7,
+          maxUnpinnedCards: 30,
+          scope: "user",
+        };
+      }
+      return {
+        companyId: input.companyId,
+        userId: input.userId,
+        cadence: row.cadence,
+        retentionDays: row.retention_days,
+        doneRetentionHours: row.done_retention_hours,
+        staleAfterDays: row.stale_after_days,
+        maxUnpinnedCards: row.max_unpinned_cards,
+        scope: row.scope,
+      };
+    },
+
     async upsertPreferences(preferences: BriefPreferences): Promise<void> {
       await db.execute(
         `INSERT INTO ${preferencesTable} (
