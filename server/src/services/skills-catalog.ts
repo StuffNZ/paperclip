@@ -60,7 +60,12 @@ function getCatalogManifest() {
 }
 
 function getCatalogSkills() {
-  return getCatalogManifest().skills;
+  const catalogManifest = getCatalogManifest();
+  return catalogManifest.skills.map((skill) => ({
+    ...skill,
+    packageName: catalogManifest.packageName,
+    packageVersion: catalogManifest.packageVersion,
+  }));
 }
 
 function isMarkdownPath(filePath: string) {

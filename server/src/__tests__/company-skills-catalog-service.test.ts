@@ -178,6 +178,9 @@ describeEmbeddedPostgres("companySkillService.installFromCatalog", () => {
     const listed = await svc.list(companyId);
     expect(listed.find((skill) => skill.id === result.skill.id)).toMatchObject({
       catalogKind: "bundled",
+      originHash: sampleCatalogSkill.contentHash,
+      packageName: "@paperclipai/skills-catalog",
+      packageVersion: "0.3.1",
     });
   });
 

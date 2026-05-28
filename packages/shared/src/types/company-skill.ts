@@ -52,6 +52,9 @@ export interface CompanySkillListItem {
   sourceBadge: CompanySkillSourceBadge;
   sourcePath: string | null;
   catalogKind: "bundled" | "optional" | null;
+  originHash: string | null;
+  packageName: string | null;
+  packageVersion: string | null;
 }
 
 export interface CompanySkillUsageAgent {
@@ -229,6 +232,8 @@ export interface CatalogSkill {
   tags: string[];
   files: CatalogSkillFile[];
   contentHash: string;
+  packageName?: string;
+  packageVersion?: string;
 }
 
 export interface CatalogSkillListQuery {

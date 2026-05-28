@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,6 +157,8 @@ type SkillSourceMeta = {
   catalogId?: string;
   catalogKind?: string;
   originHash?: string;
+  packageName?: string;
+  packageVersion?: string;
   originVersion?: string;
   originSnapshotLocator?: string;
   installedHash?: string;
@@ -1849,6 +1851,9 @@ function toCompanySkillListItem(skill: CompanySkillListRow, attachedAgentCount: 
   const catalogKind = skill.sourceType === "catalog" && (metadata.catalogKind === "bundled" || metadata.catalogKind === "optional")
     ? metadata.catalogKind
     : null;
+  const originHash = skill.sourceType === "catalog" ? asString(metadata.originHash) : null;
+  const packageName = skill.sourceType === "catalog" ? asString(metadata.packageName) : null;
+  const packageVersion = skill.sourceType === "catalog" ? asString(metadata.packageVersion) : null;
   return {
     id: skill.id,
     companyId: skill.companyId,
@@ -1871,6 +1876,9 @@ function toCompanySkillListItem(skill: CompanySkillListRow, attachedAgentCount: 
     sourceBadge: source.sourceBadge,
     sourcePath: source.sourcePath,
     catalogKind,
+    originHash,
+    packageName,
+    packageVersion,
   };
 }
 
@@ -2804,6 +2812,45 @@ export function companySkillService(db: Db) {
     return skillDir;
   }
 
+  async function createDirectoryReplacement(targetDir: string) {
+    const parentDir = path.dirname(targetDir);
+    const baseName = path.basename(targetDir);
+    await fs.mkdir(parentDir, { recursive: true });
+    const stagingDir = path.join(parentDir, `.${baseName}.tmp-${randomUUID()}`);
+    const previousDir = path.join(parentDir, `.${baseName}.old-${randomUUID()}`);
+    await fs.rm(stagingDir, { recursive: true, force: true });
+    await fs.mkdir(stagingDir, { recursive: true });
+
+    return {
+      stagingDir,
+      async commit() {
+        let hasPrevious = false;
+        try {
+          await fs.rename(targetDir, previousDir);
+          hasPrevious = true;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+
+        try {
+          await fs.rename(stagingDir, targetDir);
+        } catch (error) {
+          if (hasPrevious) {
+            await fs.rename(previousDir, targetDir).catch(() => undefined);
+          }
+          throw error;
+        }
+
+        if (hasPrevious) {
+          await fs.rm(previousDir, { recursive: true, force: true });
+        }
+      },
+      async cleanup() {
+        await fs.rm(stagingDir, { recursive: true, force: true });
+      },
+    };
+  }
+
   async function materializeCatalogManifestSkillFiles(
     companyId: string,
     catalogSkill: CatalogSkill,
@@ -2811,16 +2858,20 @@ export function companySkillService(db: Db) {
   ) {
     const catalogRoot = path.resolve(resolveManagedSkillsRoot(companyId), "__catalog__");
     const skillDir = path.resolve(catalogRoot, buildSkillRuntimeName(catalogSkill.key, slug));
-    await fs.rm(skillDir, { recursive: true, force: true });
-    await fs.mkdir(skillDir, { recursive: true });
-
-    for (const entry of catalogSkill.files) {
-      const targetPath = path.resolve(skillDir, entry.path);
-      if (targetPath !== skillDir && !targetPath.startsWith(`${skillDir}${path.sep}`)) {
-        throw unprocessable(`Catalog file path is invalid: ${entry.path}`);
+    const replacement = await createDirectoryReplacement(skillDir);
+    try {
+      for (const entry of catalogSkill.files) {
+        const targetPath = path.resolve(replacement.stagingDir, entry.path);
+        if (targetPath !== replacement.stagingDir && !targetPath.startsWith(`${replacement.stagingDir}${path.sep}`)) {
+          throw unprocessable(`Catalog file path is invalid: ${entry.path}`);
+        }
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await copyCatalogSkillFile(catalogSkill.id, entry.path, targetPath);
       }
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await copyCatalogSkillFile(catalogSkill.id, entry.path, targetPath);
+      await replacement.commit();
+    } catch (error) {
+      await replacement.cleanup();
+      throw error;
     }
 
     return skillDir;
@@ -2837,16 +2888,20 @@ export function companySkillService(db: Db) {
       buildSkillRuntimeName(catalogSkill.key, slug),
       catalogSkill.contentHash.replace(/^sha256:/, ""),
     );
-    await fs.rm(snapshotDir, { recursive: true, force: true });
-    await fs.mkdir(snapshotDir, { recursive: true });
-
-    for (const entry of catalogSkill.files) {
-      const targetPath = path.resolve(snapshotDir, entry.path);
-      if (targetPath !== snapshotDir && !targetPath.startsWith(`${snapshotDir}${path.sep}`)) {
-        throw unprocessable(`Catalog file path is invalid: ${entry.path}`);
+    const replacement = await createDirectoryReplacement(snapshotDir);
+    try {
+      for (const entry of catalogSkill.files) {
+        const targetPath = path.resolve(replacement.stagingDir, entry.path);
+        if (targetPath !== replacement.stagingDir && !targetPath.startsWith(`${replacement.stagingDir}${path.sep}`)) {
+          throw unprocessable(`Catalog file path is invalid: ${entry.path}`);
+        }
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        await copyCatalogSkillFile(catalogSkill.id, entry.path, targetPath);
       }
-      await fs.mkdir(path.dirname(targetPath), { recursive: true });
-      await copyCatalogSkillFile(catalogSkill.id, entry.path, targetPath);
+      await replacement.commit();
+    } catch (error) {
+      await replacement.cleanup();
+      throw error;
     }
 
     return snapshotDir;

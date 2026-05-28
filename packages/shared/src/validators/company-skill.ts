@@ -36,6 +36,9 @@ export const companySkillListItemSchema = companySkillSchema.extend({
   sourceLabel: z.string().nullable(),
   sourceBadge: companySkillSourceBadgeSchema,
   catalogKind: z.enum(["bundled", "optional"]).nullable(),
+  originHash: z.string().nullable(),
+  packageName: z.string().nullable(),
+  packageVersion: z.string().nullable(),
 });
 
 export const companySkillUsageAgentSchema = z.object({
@@ -197,6 +200,8 @@ export const catalogSkillSchema = z.object({
   tags: z.array(z.string()),
   files: z.array(catalogSkillFileSchema),
   contentHash: z.string().min(1),
+  packageName: z.string().min(1).optional(),
+  packageVersion: z.string().min(1).optional(),
 });
 
 export const catalogSkillListQuerySchema = z.object({

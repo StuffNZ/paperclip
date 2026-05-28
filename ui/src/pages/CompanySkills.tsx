@@ -742,9 +742,7 @@ function CatalogDetailPane({
     return <EmptyState icon={Boxes} message="Select a catalog skill to inspect." />;
   }
 
-  const installedHash = installedSkill
-    ? readonlyMetadataValue((installedSkill as CompanySkillListItem & { metadata?: Record<string, unknown> | null }).metadata ?? null, "originHash")
-    : null;
+  const installedHash = installedSkill?.originHash ?? null;
   const hashOutOfSync = Boolean(installedSkill && installedHash && installedHash !== skill.contentHash);
   const isInstalled = Boolean(installedSkill);
 
@@ -2174,9 +2172,7 @@ export function CompanySkills() {
 
   function openInstallDialog(catalogSkill: CatalogSkill) {
     const existing = installedByKey.get(catalogSkill.key) ?? null;
-    const installedHash = existing
-      ? readonlyMetadataValue((existing as CompanySkillListItem & { metadata?: Record<string, unknown> | null }).metadata ?? null, "originHash")
-      : null;
+    const installedHash = existing?.originHash ?? null;
     const action: "install" | "update" | "replace" = existing
       ? installedHash && installedHash !== catalogSkill.contentHash
         ? "update"
@@ -2342,8 +2338,8 @@ export function CompanySkills() {
         open={installDialogState.open}
         onOpenChange={(open) => setInstallDialogState((current) => ({ ...current, open, error: open ? current.error : null }))}
         skill={installDialogState.catalogSkill}
-        packageName={null}
-        packageVersion={null}
+        packageName={installDialogState.catalogSkill?.packageName ?? installDialogState.conflict?.packageName ?? null}
+        packageVersion={installDialogState.catalogSkill?.packageVersion ?? installDialogState.conflict?.packageVersion ?? null}
         conflict={installDialogState.conflict}
         defaultSlug={installDialogState.defaultSlug}
         defaultForce={installDialogState.defaultForce}
@@ -2601,8 +2597,8 @@ export function CompanySkills() {
             <div className="min-w-0 pl-6">
               <CatalogDetailPane
                 skill={selectedCatalogSkill}
-                packageName={null}
-                packageVersion={null}
+                packageName={selectedCatalogSkill?.packageName ?? (selectedCatalogSkill ? installedByKey.get(selectedCatalogSkill.key)?.packageName : null) ?? null}
+                packageVersion={selectedCatalogSkill?.packageVersion ?? (selectedCatalogSkill ? installedByKey.get(selectedCatalogSkill.key)?.packageVersion : null) ?? null}
                 installedSkill={selectedCatalogSkill ? installedByKey.get(selectedCatalogSkill.key) ?? null : null}
                 installedSkillId={(selectedCatalogSkill ? installedByKey.get(selectedCatalogSkill.key)?.id : null) ?? null}
                 fileQuery={catalogFileQuery}
