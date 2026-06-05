@@ -361,12 +361,16 @@ function buildTeamInstallOptions(opts: TeamInstallOptions): CatalogTeamInstallOp
   return buildTeamOptions(opts);
 }
 
+const INSTALL_APPROVAL_FALLBACK_MESSAGES = [
+  "missing permission: agents:create",
+  "missing permission: can create agents",
+];
+
 function shouldRequestInstallApproval(error: unknown, opts: TeamInstallOptions): error is ApiRequestError {
-  return Boolean(
-    (opts.requestApprovalOnForbidden || isPaperclipTaskRun()) &&
-      error instanceof ApiRequestError &&
-      error.status === 403,
-  );
+  if (!(opts.requestApprovalOnForbidden || isPaperclipTaskRun())) return false;
+  if (!(error instanceof ApiRequestError) || error.status !== 403) return false;
+  const message = error.message.toLowerCase();
+  return INSTALL_APPROVAL_FALLBACK_MESSAGES.some((expected) => message.includes(expected));
 }
 
 function isPaperclipTaskRun(): boolean {

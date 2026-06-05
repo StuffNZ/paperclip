@@ -69,7 +69,7 @@ export function teamsCatalogRoutes(db: Db) {
       category: firstQueryString(req.query.category),
       q: firstQueryString(req.query.q),
     });
-    res.json(listCatalogTeams(query));
+    res.json(await listCatalogTeams(query));
   });
 
   router.get("/teams/catalog/:catalogId/files", async (req, res) => {
@@ -82,7 +82,7 @@ export function teamsCatalogRoutes(db: Db) {
   router.get("/teams/catalog/:catalogId", async (req, res) => {
     assertAuthenticated(req);
     const catalogRef = firstQueryString(req.query.ref) ?? (req.params.catalogId as string);
-    res.json(getCatalogTeamOrThrow(catalogRef));
+    res.json(await getCatalogTeamOrThrow(catalogRef));
   });
 
   router.get("/companies/:companyId/teams/catalog/installed", async (req, res) => {

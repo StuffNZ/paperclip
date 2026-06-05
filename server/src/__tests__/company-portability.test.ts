@@ -64,6 +64,7 @@ const assetSvc = {
 
 const secretSvc = {
   create: vi.fn(async () => ({ id: "secret-created" })),
+  remove: vi.fn(async () => true),
   normalizeAdapterConfigForPersistence: vi.fn(async (_companyId: string, config: Record<string, unknown>) => config),
   normalizeEnvBindingsForPersistence: vi.fn(async (_companyId: string, env: Record<string, unknown>) => env),
   syncEnvBindingsForTarget: vi.fn(async () => []),
@@ -133,6 +134,7 @@ describe("company portability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     secretSvc.create.mockResolvedValue({ id: "secret-created" });
+    secretSvc.remove.mockResolvedValue(true);
     secretSvc.normalizeAdapterConfigForPersistence.mockImplementation(async (_companyId, config) => config);
     secretSvc.normalizeEnvBindingsForPersistence.mockImplementation(async (_companyId, env) => env);
     secretSvc.syncEnvBindingsForTarget.mockResolvedValue([]);
@@ -1499,6 +1501,69 @@ describe("company portability", () => {
         OPENAI_API_KEY: expect.objectContaining({ secretId: "secret-created" }),
       }),
     );
+  });
+
+  it("removes import secrets created before a later import failure", async () => {
+    const portability = companyPortabilityService({} as any);
+    agentSvc.list.mockResolvedValue([]);
+    secretSvc.create.mockResolvedValueOnce({ id: "secret-created-for-failed-import" });
+    agentSvc.create.mockRejectedValueOnce(new Error("agent create failed"));
+
+    await expect(portability.importBundle({
+      source: {
+        type: "inline",
+        files: {
+          "COMPANY.md": [
+            "---",
+            "name: Import",
+            "includes:",
+            "  - agents/coder/AGENTS.md",
+            "---",
+            "",
+          ].join("\n"),
+          "agents/coder/AGENTS.md": [
+            "---",
+            "name: Coder",
+            "slug: coder",
+            "kind: agent",
+            "---",
+            "",
+            "# Coder",
+            "",
+          ].join("\n"),
+          ".paperclip.yaml": [
+            "schema: paperclip/v1",
+            "agents:",
+            "  coder:",
+            "    adapter:",
+            "      type: codex_local",
+            "      config: {}",
+            "    inputs:",
+            "      env:",
+            "        OPENAI_API_KEY:",
+            "          kind: secret",
+            "          requirement: required",
+            "",
+          ].join("\n"),
+        },
+      },
+      include: {
+        company: false,
+        agents: true,
+        projects: false,
+        issues: false,
+      },
+      target: {
+        mode: "existing_company",
+        companyId: "company-1",
+      },
+      collisionStrategy: "rename",
+      secretValues: {
+        "agent:coder:OPENAI_API_KEY": "sk-imported",
+      },
+    }, "user-1")).rejects.toThrow("agent create failed");
+
+    expect(secretSvc.remove).toHaveBeenCalledWith("secret-created-for-failed-import");
   });
 
   it("reparents imported roots to pre-existing target managers before resolving imported hierarchy", async () => {

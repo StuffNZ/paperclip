@@ -1,4 +1,3 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -131,50 +130,66 @@ export interface CatalogTeamFileDetail {
 }
 
 const serviceDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(serviceDir, "../../..");
-const catalogPackageRoot = path.join(repoRoot, "packages/teams-catalog");
-const catalogManifestPath = path.join(catalogPackageRoot, "generated/catalog.json");
+const catalogPackageRootCandidates = buildCatalogPackageRootCandidates();
+let catalogPackageRoot = catalogPackageRootCandidates[0]!;
+let catalogManifestPath = path.join(catalogPackageRoot, "generated/catalog.json");
 let cachedCatalogManifest: {
   manifest: CatalogManifestFile;
+  manifestPath: string;
   mtimeMs: number;
   size: number;
 } | null = null;
 
-function loadCatalogManifest(): CatalogManifestFile {
-  if (!existsSync(catalogManifestPath)) {
-    throw new Error(
-      `Teams catalog manifest not found at ${catalogManifestPath}. Run pnpm --filter @paperclipai/teams-catalog build:manifest.`,
-    );
-  }
-  return JSON.parse(readFileSync(catalogManifestPath, "utf8")) as CatalogManifestFile;
+function buildCatalogPackageRootCandidates() {
+  const configuredRoot = process.env.PAPERCLIP_TEAMS_CATALOG_DIR?.trim();
+  const candidates = [
+    ...(configuredRoot ? [path.resolve(configuredRoot)] : []),
+    path.resolve(process.cwd(), "packages/teams-catalog"),
+    path.resolve(serviceDir, "../../..", "packages/teams-catalog"),
+  ];
+  return Array.from(new Set(candidates));
 }
 
-function getCatalogManifest() {
-  if (!existsSync(catalogManifestPath)) {
-    throw new Error(
-      `Teams catalog manifest not found at ${catalogManifestPath}. Run pnpm --filter @paperclipai/teams-catalog build:manifest.`,
-    );
+async function statCatalogManifest() {
+  for (const candidateRoot of catalogPackageRootCandidates) {
+    const candidateManifestPath = path.join(candidateRoot, "generated/catalog.json");
+    try {
+      const stats = await fs.stat(candidateManifestPath);
+      catalogPackageRoot = candidateRoot;
+      catalogManifestPath = candidateManifestPath;
+      return { stats, manifestPath: candidateManifestPath };
+    } catch {
+      // Try the next known runtime layout before reporting all checked paths.
+    }
   }
-  const stats = statSync(catalogManifestPath);
+  throw new Error(
+    `Teams catalog manifest not found. Checked: ${catalogPackageRootCandidates.map((root) => path.join(root, "generated/catalog.json")).join(", ")}. Run pnpm --filter @paperclipai/teams-catalog build:manifest.`,
+  );
+}
+
+async function getCatalogManifest() {
+  const { stats, manifestPath } = await statCatalogManifest();
   if (
     cachedCatalogManifest
+    && cachedCatalogManifest.manifestPath === manifestPath
     && cachedCatalogManifest.mtimeMs === stats.mtimeMs
     && cachedCatalogManifest.size === stats.size
   ) {
     return cachedCatalogManifest.manifest;
   }
 
-  const manifest = loadCatalogManifest();
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8")) as CatalogManifestFile;
   cachedCatalogManifest = {
     manifest,
+    manifestPath,
     mtimeMs: stats.mtimeMs,
     size: stats.size,
   };
   return manifest;
 }
 
-function getCatalogTeams() {
-  const manifest = getCatalogManifest();
+async function getCatalogTeams() {
+  const manifest = await getCatalogManifest();
   return manifest.teams.map((team) => ({
     ...team,
     packageName: manifest.packageName,
@@ -196,9 +211,9 @@ function searchText(team: CatalogTeam) {
   ].join("\n").toLowerCase();
 }
 
-export function listCatalogTeams(query: CatalogTeamListQuery = {}): CatalogTeam[] {
+export async function listCatalogTeams(query: CatalogTeamListQuery = {}): Promise<CatalogTeam[]> {
   const normalizedQuery = query.q?.trim().toLowerCase() ?? "";
-  return getCatalogTeams()
+  return (await getCatalogTeams())
     .filter((team) => !query.kind || team.kind === query.kind)
     .filter((team) => !query.category || team.category === query.category)
     .filter((team) => !normalizedQuery || searchText(team).includes(normalizedQuery))
@@ -242,10 +257,10 @@ export function readCatalogTeamProvenance(
   };
 }
 
-export function resolveCatalogTeamReference(reference: string): { team: CatalogTeam | null; ambiguous: boolean } {
+export async function resolveCatalogTeamReference(reference: string): Promise<{ team: CatalogTeam | null; ambiguous: boolean }> {
   const trimmed = reference.trim();
   if (!trimmed) return { team: null, ambiguous: false };
-  const teams = getCatalogTeams();
+  const teams = await getCatalogTeams();
 
   const exact = teams.find((team) => team.id === trimmed || team.key === trimmed);
   if (exact) return { team: exact, ambiguous: false };
@@ -256,8 +271,8 @@ export function resolveCatalogTeamReference(reference: string): { team: CatalogT
   return { team: null, ambiguous: false };
 }
 
-export function getCatalogTeamOrThrow(reference: string): CatalogTeam {
-  const result = resolveCatalogTeamReference(reference);
+export async function getCatalogTeamOrThrow(reference: string): Promise<CatalogTeam> {
+  const result = await resolveCatalogTeamReference(reference);
   if (result.ambiguous) {
     throw conflict(`Catalog team slug "${reference}" is ambiguous. Use an id or key.`);
   }
@@ -310,7 +325,7 @@ export async function readCatalogTeamFile(
   reference: string,
   relativePath = "TEAM.md",
 ): Promise<CatalogTeamFileDetail> {
-  const team = getCatalogTeamOrThrow(reference);
+  const team = await getCatalogTeamOrThrow(reference);
   const resolved = resolveCatalogTeamFile(team, relativePath);
 
   if (resolved.fileEntry.kind === "asset") {
@@ -414,8 +429,8 @@ function renderSyntheticCompanyMarkdown(team: CatalogTeam) {
   return lines.join("\n");
 }
 
-function catalogProvenance(team: CatalogTeam) {
-  const manifest = getCatalogManifest();
+async function catalogProvenance(team: CatalogTeam) {
+  const manifest = await getCatalogManifest();
   return {
     catalogId: team.id,
     catalogKey: team.key,
@@ -428,8 +443,8 @@ function catalogProvenance(team: CatalogTeam) {
   };
 }
 
-function renderCatalogProvenanceYaml(team: CatalogTeam, targetManager: CatalogTargetManagerReference | null) {
-  const provenance = catalogProvenance(team);
+async function renderCatalogProvenanceYaml(team: CatalogTeam, targetManager: CatalogTargetManagerReference | null) {
+  const provenance = await catalogProvenance(team);
   const agentSlugs = Array.from(new Set(team.agentSlugs)).sort();
   const projectSlugs = Array.from(new Set(team.projectSlugs)).sort();
   const taskSlugs = team.files
@@ -798,15 +813,16 @@ function buildPortabilityInput(
   source: CompanyPortabilitySource,
   options: CatalogTeamImportOptions,
 ): CompanyPortabilityPreview {
+  const requestedInclude = options.include ?? {};
   return {
     source,
     include: {
-      company: false,
       agents: true,
       projects: true,
       issues: true,
       skills: true,
-      ...(options.include ?? {}),
+      ...requestedInclude,
+      company: false,
     },
     target: {
       mode: "existing_company",
@@ -853,7 +869,7 @@ export function teamsCatalogService(db: Db) {
     catalogRef: string,
     options: CatalogTeamImportOptions = {},
   ): Promise<CatalogTeamPreparedSource> {
-    const team = getCatalogTeamOrThrow(catalogRef);
+    const team = await getCatalogTeamOrThrow(catalogRef);
     const warnings: string[] = [];
     const errors: string[] = [];
 
@@ -877,7 +893,7 @@ export function teamsCatalogService(db: Db) {
       typeof files[".paperclip.yaml"] === "string"
         ? parseYamlFrontmatter(files[".paperclip.yaml"])
         : {};
-    const generatedExtension = parseYamlFrontmatter(renderCatalogProvenanceYaml(team, targetManager));
+    const generatedExtension = parseYamlFrontmatter(await renderCatalogProvenanceYaml(team, targetManager));
     files[".paperclip.yaml"] = renderYamlFile(mergePlainRecords(existingExtension, generatedExtension));
     rewriteAgentCatalogSkillRefs(team, files);
 
@@ -979,10 +995,6 @@ export function teamsCatalogService(db: Db) {
       throw unprocessable(`Catalog team source preparation failed: ${prepared.errors.join("; ")}`);
     }
 
-    const warnings = [
-      ...prepared.warnings,
-      ...await prepareSkillInstalls(companyId, prepared),
-    ];
     const importInput: CompanyPortabilityImport = {
       ...buildPortabilityInput(companyId, prepared.source, options),
       adapterOverrides: withSafeCatalogAdapterDefaults(
@@ -991,6 +1003,19 @@ export function teamsCatalogService(db: Db) {
       ),
       secretValues: options.secretValues,
     };
+    const importPreview = await portability.previewImport(importInput, {
+      mode: "agent_safe",
+      sourceCompanyId: companyId,
+    });
+    if (importPreview.errors.length > 0) {
+      throw unprocessable(`Catalog team import preview has errors: ${importPreview.errors.join("; ")}`);
+    }
+    const warnings = [
+      ...prepared.warnings,
+      ...importPreview.warnings,
+      `Catalog agents without explicit overrides default to ${DEFAULT_SAFE_CATALOG_ADAPTER_TYPE}. Pass adapterOverrides to use a different supported adapter.`,
+      ...await prepareSkillInstalls(companyId, prepared),
+    ];
     const result = await portability.importBundle(
       importInput,
       options.actor?.userId ?? (options.actor?.actorType === "user" ? options.actor.actorId : null),
@@ -1022,7 +1047,7 @@ export function teamsCatalogService(db: Db) {
    */
   async function listInstalledCatalogTeams(companyId: string): Promise<InstalledCatalogTeam[]> {
     const companyAgents = await agents.list(companyId);
-    const currentTeams = getCatalogTeams();
+    const currentTeams = await getCatalogTeams();
     const currentById = new Map(currentTeams.map((team) => [team.id, team]));
 
     type Aggregate = {

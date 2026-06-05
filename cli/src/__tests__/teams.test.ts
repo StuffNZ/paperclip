@@ -502,6 +502,36 @@ describe("teams CLI commands", () => {
     expect(errorSpy).not.toHaveBeenCalled();
   });
 
+  it("does not request board approval for unrelated forbidden install errors", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse({ error: "Agent key cannot access another company" }, 403));
+    vi.spyOn(process, "exit").mockImplementation(((code?: string | number | null) => {
+      throw new Error(`exit:${code ?? 0}`);
+    }) as typeof process.exit);
+
+    await expect(runCommand([
+      "teams",
+      "install",
+      "product-engineering",
+      "--company-id",
+      "company-1",
+      "--request-approval-on-forbidden",
+      "--api-base",
+      "http://paperclip.test",
+      "--api-key",
+      "token",
+    ])).rejects.toThrow("exit:1");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://paperclip.test/api/companies/company-1/teams/catalog/ref/install?ref=product-engineering",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    );
+    expect(String(errorSpy.mock.calls[0]?.[0])).toContain("Agent key cannot access another company");
+  });
+
   it("surfaces server blocks for unsafe local-path catalog team sources", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse({
       error: 'Local path skill source "../unsafe" is development-only and is not allowed for catalog team install.',

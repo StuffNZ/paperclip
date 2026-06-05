@@ -186,6 +186,46 @@ describe("teamsCatalogService", () => {
     );
   });
 
+  it("forces catalog previews to exclude company metadata even when requested", async () => {
+    const svc = teamsCatalogService({} as any);
+
+    await svc.previewCatalogTeamImport("company-1", "content-machine", {
+      include: { company: true, agents: false },
+    });
+
+    expect(mockCompanyPortabilityService.previewImport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          company: false,
+          agents: false,
+        }),
+      }),
+      { mode: "agent_safe", sourceCompanyId: "company-1" },
+    );
+  });
+
+  it("preflights imports before installing catalog skills", async () => {
+    mockCompanyPortabilityService.previewImport.mockResolvedValueOnce({
+      include: { company: false, agents: true, projects: true, issues: true, skills: true },
+      targetCompanyId: "company-1",
+      targetCompanyName: "Paperclip",
+      collisionStrategy: "rename",
+      selectedAgentSlugs: ["ceo"],
+      plan: { companyAction: "none", agentPlans: [], projectPlans: [], issuePlans: [] },
+      manifest: { agents: [], skills: [], projects: [], issues: [], envInputs: [], includes: { company: false, agents: true, projects: true, issues: true, skills: true }, company: null, schemaVersion: 1, generatedAt: new Date().toISOString(), source: null, sidebar: null },
+      files: {},
+      envInputs: [],
+      warnings: [],
+      errors: ["Safe import does not allow process adapter type."],
+    });
+    const svc = teamsCatalogService({} as any);
+
+    await expect(svc.installCatalogTeam("company-1", "core-exec-team")).rejects.toMatchObject({ status: 422 });
+
+    expect(mockCompanySkillService.installFromCatalog).not.toHaveBeenCalled();
+    expect(mockCompanyPortabilityService.importBundle).not.toHaveBeenCalled();
+  });
+
   it("injects safe claude_local adapter defaults for every bundled agent when no overrides are supplied", async () => {
     const svc = teamsCatalogService({} as any);
 

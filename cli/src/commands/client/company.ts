@@ -1750,11 +1750,11 @@ async function resolveCurrentCompanyId(ctx: { companyId?: string; api: { get<T>(
 }
 
 function isBoardAccessRequiredError(error: unknown): error is ApiRequestError {
-  return error instanceof ApiRequestError && error.status === 403 && error.message.includes("Board access required");
+  return error instanceof ApiRequestError && error.status === 403 && error.message.toLowerCase().includes("board access required");
 }
 
 function isInstanceAdminRequiredError(error: unknown): error is ApiRequestError {
-  return error instanceof ApiRequestError && error.status === 403 && error.message.includes("Instance admin");
+  return error instanceof ApiRequestError && error.status === 403 && error.message.toLowerCase().includes("instance admin");
 }
 
 function addCompanyJsonPost(parent: Command, name: string, description: string, pathSuffix: string): void {

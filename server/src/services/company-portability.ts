@@ -3052,6 +3052,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
     envInputs: CompanyPortabilityEnvInput[],
     secretValues: Record<string, string> | null | undefined,
     actorUserId: string | null | undefined,
+    createdSecretIds: string[] = [],
   ) {
     if (envInputs.length === 0) return;
     const missingRequired = envInputs.filter((input) => {
@@ -3088,6 +3089,7 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
         },
         { userId: actorUserId ?? null, agentId: null },
       );
+      createdSecretIds.push(secret.id);
       writeManifestEnvBinding(manifest, input, {
         type: "secret_ref",
         secretId: secret.id,
@@ -4385,13 +4387,16 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
       }
       return true;
     });
-    await materializeImportEnvInputValues(
-      targetCompany.id,
-      sourceManifest,
-      importEnvInputs,
-      input.secretValues,
-      actorUserId,
-    );
+    const createdImportSecretIds: string[] = [];
+    try {
+      await materializeImportEnvInputValues(
+        targetCompany.id,
+        sourceManifest,
+        importEnvInputs,
+        input.secretValues,
+        actorUserId,
+        createdImportSecretIds,
+      );
 
     if (include.company) {
       const logoPath = sourceManifest.company?.logoPath ?? null;
@@ -4950,17 +4955,23 @@ export function companyPortabilityService(db: Db, storage?: StorageService) {
       }
     }
 
-    return {
-      company: {
-        id: targetCompany.id,
-        name: targetCompany.name,
-        action: companyAction,
-      },
-      agents: resultAgents,
-      projects: resultProjects,
-      envInputs: sourceManifest.envInputs ?? [],
-      warnings,
-    };
+      return {
+        company: {
+          id: targetCompany.id,
+          name: targetCompany.name,
+          action: companyAction,
+        },
+        agents: resultAgents,
+        projects: resultProjects,
+        envInputs: sourceManifest.envInputs ?? [],
+        warnings,
+      };
+    } catch (error) {
+      for (const secretId of createdImportSecretIds) {
+        await secrets.remove(secretId).catch(() => undefined);
+      }
+      throw error;
+    }
   }
 
   return {
