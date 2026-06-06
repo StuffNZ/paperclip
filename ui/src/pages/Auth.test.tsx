@@ -44,7 +44,7 @@ vi.mock("@/context/CompanyContext", () => ({
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
 
 async function act(callback: () => void | Promise<void>) {
-  let result: void | Promise<void>;
+  let result: void | Promise<void> = undefined;
   flushSync(() => {
     result = callback();
   });
