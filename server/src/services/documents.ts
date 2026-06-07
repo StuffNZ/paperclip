@@ -42,6 +42,19 @@ function isUniqueViolation(error: unknown): boolean {
   return !!error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "23505";
 }
 
+// Resolve a document-revision run-id to null when it does not reference a known
+// heartbeat_runs row, avoiding a FK violation when an agent's live run-id is unknown to
+// this server's DB. Returns the run-id unchanged when it exists.
+async function persistableDocumentRunId(db: Db, runId: string | null): Promise<string | null> {
+  if (!runId) return null;
+  const run = await db
+    .select({ id: heartbeatRuns.id })
+    .from(heartbeatRuns)
+    .where(eq(heartbeatRuns.id, runId))
+    .then((rows) => rows[0] ?? null);
+  return run ? runId : null;
+}
+
 function nextAvailableDocumentKey(sourceKey: string, existingKeys: string[]) {
   const usedKeys = new Set(existingKeys);
   for (let index = 2; index < 1000; index += 1) {
@@ -817,6 +830,13 @@ export function documentService(db: Db) {
         .then((rows) => rows[0] ?? null);
       if (!issue) throw notFound("Issue not found");
 
+      // document_revisions.created_by_run_id is FK-constrained to heartbeat_runs. An agent
+      // presents its live run-id, which may not exist in this server's DB (e.g. a worktree
+      // dev environment whose DB never recorded the run). Persisting a missing run-id would
+      // raise a FK violation and surface as a 500, so resolve provenance to null when the
+      // run is unknown. In real deployments the run exists and the value is unchanged.
+      const createdByRunId = await persistableDocumentRunId(db, input.createdByRunId ?? null);
+
       const maxAttempts = input.lockedDocumentStrategy === "create_new_document" ? 3 : 1;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         try {
@@ -893,7 +913,7 @@ export function documentService(db: Db) {
                     changeSummary: input.changeSummary ?? null,
                     createdByAgentId: input.createdByAgentId ?? null,
                     createdByUserId: input.createdByUserId ?? null,
-                    createdByRunId: input.createdByRunId ?? null,
+                    createdByRunId,
                     createdAt: now,
                   })
                   .returning();
@@ -994,7 +1014,7 @@ export function documentService(db: Db) {
                 changeSummary: input.changeSummary ?? null,
                 createdByAgentId: input.createdByAgentId ?? null,
                 createdByUserId: input.createdByUserId ?? null,
-                createdByRunId: input.createdByRunId ?? null,
+                createdByRunId,
                 createdAt: now,
               })
               .returning();
@@ -1078,7 +1098,7 @@ export function documentService(db: Db) {
               changeSummary: input.changeSummary ?? null,
               createdByAgentId: input.createdByAgentId ?? null,
               createdByUserId: input.createdByUserId ?? null,
-              createdByRunId: input.createdByRunId ?? null,
+              createdByRunId,
               createdAt: now,
             })
             .returning();
