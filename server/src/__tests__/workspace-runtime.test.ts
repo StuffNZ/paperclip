@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -37,7 +38,7 @@ import {
   stopRuntimeServicesForExecutionWorkspace,
   type RealizedExecutionWorkspace,
 } from "../services/workspace-runtime.ts";
-import { writeLocalServiceRegistryRecord } from "../services/local-service-supervisor.ts";
+import { readLocalServicePortOwner, writeLocalServiceRegistryRecord } from "../services/local-service-supervisor.ts";
 import { resolvePaperclipConfigPath } from "../paths.ts";
 import type { WorkspaceOperation } from "@paperclipai/shared";
 import type { WorkspaceOperationRecorder } from "../services/workspace-operations.ts";
@@ -2912,6 +2913,34 @@ describe("resolveShell (shell fallback)", () => {
     process.env.SHELL = "/definitely/missing/zsh";
     Object.defineProperty(process, "platform", { value: "linux" });
     expect(resolveShell()).toBe("/bin/sh");
+  });
+});
+
+describe("readLocalServicePortOwner", () => {
+  it("detects the owner of a listening TCP port", async () => {
+    try {
+      await execFileAsync("lsof", ["-v"]);
+    } catch {
+      return;
+    }
+
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    try {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : null;
+      expect(port).toBeTypeOf("number");
+
+      const owner = await readLocalServicePortOwner(port!);
+      expect(owner).toBe(process.pid);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      });
+    }
   });
 });
 

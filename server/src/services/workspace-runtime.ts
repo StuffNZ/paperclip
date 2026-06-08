@@ -2125,9 +2125,7 @@ async function startLocalRuntimeService(input: {
   });
   const reusableStoppedPort =
     asString(portConfig.type, "") === "auto" && stoppedReuseCandidate?.port
-      ? (await readLocalServicePortOwner(stoppedReuseCandidate.port))
-        ? null
-        : stoppedReuseCandidate.port
+      ? stoppedReuseCandidate.port
       : null;
   const port =
     asString(portConfig.type, "") === "auto"
@@ -2181,10 +2179,13 @@ async function startLocalRuntimeService(input: {
   });
   const adoptedRecord = await findAdoptableLocalService({
     serviceKey,
+    profileKind: "workspace-runtime",
+    serviceName,
     command,
     cwd: serviceCwd,
     envFingerprint: serviceIdentityFingerprint,
-    port: identityPort,
+    port: port ?? identityPort,
+    url,
   });
   if (adoptedRecord) {
     return {
