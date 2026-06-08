@@ -58,6 +58,7 @@ async function seedGraph(db: Db, input: {
   targetProjectRoot?: string;
   executionRoot?: string | null;
   projectSourceType?: string;
+  targetProjectSourceType?: string;
 }): Promise<TestGraph> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const companyId = crypto.randomUUID();
@@ -111,7 +112,7 @@ async function seedGraph(db: Db, input: {
       companyId,
       projectId: targetProjectId,
       name: "Target workspace",
-      sourceType: "local_path",
+      sourceType: input.targetProjectSourceType ?? "local_path",
       cwd: input.targetProjectRoot ?? input.projectRoot,
       isPrimary: true,
     },
@@ -284,6 +285,48 @@ describeEmbeddedPostgres("workspace file resources", () => {
       displayPath: "Target project / docs/README.md",
     });
     expect(JSON.stringify(read?.details)).not.toContain(targetProjectRoot);
+  });
+
+  it("reads explicit cross-project git_repo workspaces with a local checkout", async () => {
+    const { root, projectRoot, targetProjectRoot, executionRoot } = await makeWorkspace();
+    const graph = await seedGraph(db, {
+      projectRoot,
+      targetProjectRoot,
+      executionRoot,
+      targetProjectSourceType: "git_repo",
+    });
+    const readmePath = "content-os/cases/active/2026-06-06-pap-10199-bundled-skills/README.md";
+    await fs.mkdir(path.join(targetProjectRoot, path.dirname(readmePath)), { recursive: true });
+    await fs.writeFile(path.join(targetProjectRoot, readmePath), "# Bundled skills\n\nRendered from content project.\n", "utf8");
+
+    const app = createApp(db, {
+      type: "board",
+      userId: "board-user",
+      companyIds: [graph.companyId],
+      source: "session",
+      isInstanceAdmin: false,
+    });
+    const res = await request(app)
+      .get(`/api/issues/${graph.issueId}/file-resources/content`)
+      .query({
+        projectId: graph.targetProjectId,
+        workspaceId: graph.targetProjectWorkspaceId,
+        path: readmePath,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body.resource).toMatchObject({
+      workspaceKind: "project_workspace",
+      workspaceId: graph.targetProjectWorkspaceId,
+      projectId: graph.targetProjectId,
+      projectName: "Target project",
+      displayPath: `Target project / ${readmePath}`,
+      provider: "git_repo",
+      previewKind: "text",
+    });
+    expect(res.body.content.encoding).toBe("utf8");
+    expect(res.body.content.data).toContain("# Bundled skills");
+    expect(JSON.stringify(res.body)).not.toContain(root);
   });
 
   it("denies explicit cross-company project workspaces", async () => {

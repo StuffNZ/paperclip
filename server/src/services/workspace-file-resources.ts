@@ -27,6 +27,7 @@ const TEXT_SNIFF_BYTES = 4096;
 const MAX_LIST_DEPTH = 20;
 const GIT_STATUS_MAX_BUFFER_BYTES = 1024 * 1024;
 const execFileAsync = promisify(execFile);
+const LOCAL_PROJECT_WORKSPACE_SOURCE_TYPES = new Set(["local_path", "non_git_path", "git_repo", "git_worktree"]);
 
 const DENIED_SEGMENTS = new Set([
   ".git",
@@ -315,9 +316,9 @@ function candidateFromProjectWorkspace(
   row: ProjectWorkspaceRow,
   project?: { id: string; name: string } | null,
 ): WorkspaceCandidate {
-  const provider = row.sourceType === "git_worktree" ? "git_worktree" : row.sourceType === "local_path" ? "local_fs" : row.sourceType;
+  const provider = row.sourceType === "local_path" ? "local_fs" : row.sourceType;
   const rootPath = row.cwd ?? null;
-  const remote = !["local_fs", "git_worktree"].includes(provider) || !rootPath;
+  const remote = !LOCAL_PROJECT_WORKSPACE_SOURCE_TYPES.has(row.sourceType) || !rootPath;
   return {
     workspaceKind: "project_workspace",
     workspaceId: row.id,
