@@ -7909,7 +7909,7 @@ export function heartbeatService(db: Db, options: HeartbeatServiceOptions = {}) 
       },
       acceptedPlanContinuation:
         readNonEmptyString(context.workspaceRefreshReason) === "accepted_plan_confirmation"
-        && !parseObject(context.acceptedPlanWakeRouting),
+        && Object.keys(parseObject(context.acceptedPlanWakeRouting)).length === 0,
     });
     if (issueRef) {
       context.paperclipIssue = {
