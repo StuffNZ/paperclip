@@ -30,6 +30,10 @@ import {
 import { errorHandler } from "../middleware/error-handler.js";
 import { issueRoutes } from "../routes/issues.js";
 import { pipelineRoutes } from "../routes/pipelines.js";
+import {
+  PIPELINE_CASE_EVENTS_MAX_LIMIT,
+  PIPELINE_CONTEXT_PACK_EVENT_LIMIT,
+} from "../services/pipelines.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe.sequential : describe.skip;
@@ -231,6 +235,90 @@ describeEmbeddedPostgres("pipeline routes", () => {
     await http.delete(`/api/pipelines/${pipelineId}/stages/${stageId}?moveCasesToStageId=${qaStage.body.id}`).expect(200);
   });
 
+  it("paginates and caps case event responses", async () => {
+    const company = await seedCompany();
+    const http = request(app(boardActor));
+    const pipeline = await http.post(`/api/companies/${company.id}/pipelines`).send({ key: "event-cap", name: "Event cap" }).expect(201);
+    const created = await http
+      .post(`/api/pipelines/${pipeline.body.id}/cases`)
+      .send({ caseKey: "event-cap", title: "Event cap" })
+      .expect(201);
+    const caseId = created.body.case.id as string;
+    const baseTime = Date.now() + 1_000;
+
+    await db.insert(pipelineCaseEvents).values(
+      Array.from({ length: PIPELINE_CASE_EVENTS_MAX_LIMIT + 25 }, (_, index) => ({
+        companyId: company.id,
+        caseId,
+        type: "updated",
+        actorType: "user",
+        actorUserId: "board-user",
+        payload: { index },
+        createdAt: new Date(baseTime + index),
+        updatedAt: new Date(baseTime + index),
+      })),
+    );
+
+    const firstPage = await http
+      .get(`/api/cases/${caseId}/events?limit=${PIPELINE_CASE_EVENTS_MAX_LIMIT + 50}`)
+      .expect(200);
+    expect(firstPage.body.items).toHaveLength(PIPELINE_CASE_EVENTS_MAX_LIMIT);
+    expect(firstPage.body.pagination).toMatchObject({
+      limit: PIPELINE_CASE_EVENTS_MAX_LIMIT,
+      offset: 0,
+      nextOffset: PIPELINE_CASE_EVENTS_MAX_LIMIT,
+      hasMore: true,
+      order: "asc",
+    });
+
+    const secondPage = await http
+      .get(`/api/cases/${caseId}/events?limit=10&offset=${PIPELINE_CASE_EVENTS_MAX_LIMIT}`)
+      .expect(200);
+    expect(secondPage.body.items).toHaveLength(10);
+    expect(secondPage.body.pagination).toMatchObject({
+      limit: 10,
+      offset: PIPELINE_CASE_EVENTS_MAX_LIMIT,
+      nextOffset: PIPELINE_CASE_EVENTS_MAX_LIMIT + 10,
+      hasMore: true,
+      order: "asc",
+    });
+  });
+
+  it("returns a bounded context-pack event tail for large histories", async () => {
+    const company = await seedCompany();
+    const http = request(app(boardActor));
+    const pipeline = await http.post(`/api/companies/${company.id}/pipelines`).send({ key: "context-tail", name: "Context tail" }).expect(201);
+    const created = await http
+      .post(`/api/pipelines/${pipeline.body.id}/cases`)
+      .send({ caseKey: "context-tail", title: "Context tail" })
+      .expect(201);
+    const caseId = created.body.case.id as string;
+    const eventCount = PIPELINE_CONTEXT_PACK_EVENT_LIMIT + 12;
+    const baseTime = Date.now() + 1_000;
+
+    await db.insert(pipelineCaseEvents).values(
+      Array.from({ length: eventCount }, (_, index) => ({
+        companyId: company.id,
+        caseId,
+        type: "updated",
+        actorType: "user",
+        actorUserId: "board-user",
+        payload: { index },
+        createdAt: new Date(baseTime + index),
+        updatedAt: new Date(baseTime + index),
+      })),
+    );
+
+    const pack = await http.get(`/api/cases/${caseId}/context-pack`).expect(200);
+    expect(pack.body.events).toHaveLength(PIPELINE_CONTEXT_PACK_EVENT_LIMIT);
+    expect(pack.body.events.map((event: { payload: { index: number } }) => event.payload.index)).toEqual(
+      Array.from(
+        { length: PIPELINE_CONTEXT_PACK_EVENT_LIMIT },
+        (_, index) => eventCount - PIPELINE_CONTEXT_PACK_EVENT_LIMIT + index,
+      ),
+    );
+  });
+
   it("returns 404 for cross-company pipeline access", async () => {
     const company = await seedCompany();
     const [pipeline] = await db.insert(pipelines).values({ companyId: company.id, key: "x", name: "X" }).returning();
@@ -344,7 +432,7 @@ describeEmbeddedPostgres("pipeline routes", () => {
     expect(approvedDetail.body.case.title).toBe("Approved title");
     expect(approvedDetail.body.case.fields).toEqual({ channel: "blog" });
     const approvedEvents = await http.get(`/api/cases/${approved.body.case.id}/events`).expect(200);
-    expect(approvedEvents.body.map((event: { type: string }) => event.type)).toEqual([
+    expect(approvedEvents.body.items.map((event: { type: string }) => event.type)).toEqual([
       "ingested",
       "transitioned",
       "updated",
@@ -361,7 +449,7 @@ describeEmbeddedPostgres("pipeline routes", () => {
     const reason = "  Keep this exact reason.  ";
     await http.post(`/api/cases/${rejected.body.case.id}/review`).send({ decision: "reject", reason, expectedVersion: 2 }).expect(200);
     const rejectedEvents = await http.get(`/api/cases/${rejected.body.case.id}/events`).expect(200);
-    const reviewEvent = rejectedEvents.body.find((event: { type: string }) => event.type === "review_decided");
+    const reviewEvent = rejectedEvents.body.items.find((event: { type: string }) => event.type === "review_decided");
     expect(reviewEvent.payload.reason).toBe(reason);
   });
 

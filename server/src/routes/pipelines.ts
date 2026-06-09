@@ -17,8 +17,16 @@ import {
   pipelines,
 } from "@paperclipai/db";
 import { validate } from "../middleware/validate.js";
-import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
-import { pipelineService, type PipelineActor, type PipelineStageConfig, type PipelineStageKind } from "../services/pipelines.js";
+import { badRequest, conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
+import {
+  PIPELINE_CASE_EVENTS_DEFAULT_LIMIT,
+  PIPELINE_CASE_EVENTS_MAX_LIMIT,
+  PIPELINE_CONTEXT_PACK_EVENT_LIMIT,
+  pipelineService,
+  type PipelineActor,
+  type PipelineStageConfig,
+  type PipelineStageKind,
+} from "../services/pipelines.js";
 import { assertCompanyAccess } from "./authz.js";
 
 const stageKindSchema = z.enum(["open", "working", "review", "done", "cancelled"]);
@@ -173,6 +181,26 @@ function actorForMutation(req: Request): PipelineActor {
     return { type: "user", userId: req.actor.userId ?? "board" };
   }
   throw unauthorized();
+}
+
+function parseOptionalNonNegativeInteger(value: unknown, name: string) {
+  if (value === undefined) return null;
+  if (Array.isArray(value)) throw badRequest(`${name} must be a single integer`);
+  const raw = typeof value === "string" ? value.trim() : String(value);
+  if (!/^\d+$/.test(raw)) throw badRequest(`${name} must be a non-negative integer`);
+  const parsed = Number(raw);
+  if (!Number.isSafeInteger(parsed)) throw badRequest(`${name} is too large`);
+  return parsed;
+}
+
+function parseCaseEventsQuery(query: Request["query"]) {
+  const requestedLimit = parseOptionalNonNegativeInteger(query.limit, "limit");
+  const offset = parseOptionalNonNegativeInteger(query.offset, "offset") ?? 0;
+  if (requestedLimit === 0) throw badRequest("limit must be a positive integer");
+  return {
+    limit: Math.min(requestedLimit ?? PIPELINE_CASE_EVENTS_DEFAULT_LIMIT, PIPELINE_CASE_EVENTS_MAX_LIMIT),
+    offset,
+  };
 }
 
 async function resolvePipelineCompanyId(db: Db, pipelineId: string) {
@@ -744,7 +772,8 @@ export function pipelineRoutes(db: Db, options: Parameters<typeof pipelineServic
   router.get("/cases/:caseId/events", async (req, res) => {
     const caseId = req.params.caseId as string;
     const companyId = await assertCaseAccess(db, req, caseId);
-    res.json(await svc.listCaseEvents(companyId, caseId));
+    const pagination = parseCaseEventsQuery(req.query);
+    res.json(await svc.listCaseEventsPage(companyId, caseId, pagination));
   });
 
   router.get("/cases/:caseId/rollup", async (req, res) => {
@@ -757,7 +786,10 @@ export function pipelineRoutes(db: Db, options: Parameters<typeof pipelineServic
     const caseId = req.params.caseId as string;
     const companyId = await assertCaseAccess(db, req, caseId);
     const detail = await getCaseDetail(db, companyId, caseId);
-    const events = await svc.listCaseEvents(companyId, caseId);
+    const events = await svc.listCaseEventsPage(companyId, caseId, {
+      limit: PIPELINE_CONTEXT_PACK_EVENT_LIMIT,
+      order: "desc",
+    });
     res.json({
       case: {
         id: detail.case.id,
@@ -773,7 +805,7 @@ export function pipelineRoutes(db: Db, options: Parameters<typeof pipelineServic
       allowedTransitions: detail.allowedNextStages,
       linkedIssues: detail.links,
       blockers: detail.blockers,
-      events: events.slice(-20),
+      events: [...events.items].reverse(),
     });
   });
 

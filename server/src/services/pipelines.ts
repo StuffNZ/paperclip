@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import type { Db } from "@paperclipai/db";
 import {
@@ -24,6 +24,9 @@ const MAX_LEASE_MS = 24 * 60 * 60 * 1000;
 const MAX_CASE_KEY_LENGTH = 1024;
 const MAX_BATCH_INGEST = 200;
 const MAX_FIELDS_BYTES = 64 * 1024;
+export const PIPELINE_CASE_EVENTS_DEFAULT_LIMIT = 50;
+export const PIPELINE_CASE_EVENTS_MAX_LIMIT = 100;
+export const PIPELINE_CONTEXT_PACK_EVENT_LIMIT = 20;
 
 const DEFAULT_STAGES = [
   { key: "intake", name: "Intake", kind: "open", position: 100 },
@@ -1749,6 +1752,39 @@ export function pipelineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeu
 
     async getCaseRollup(companyId: string, caseId: string) {
       return computeCaseRollup(db, companyId, caseId);
+    },
+
+    async listCaseEventsPage(
+      companyId: string,
+      caseId: string,
+      options?: { limit?: number; offset?: number; order?: "asc" | "desc" },
+    ) {
+      const limit = Math.min(
+        PIPELINE_CASE_EVENTS_MAX_LIMIT,
+        Math.max(1, Math.floor(options?.limit ?? PIPELINE_CASE_EVENTS_DEFAULT_LIMIT)),
+      );
+      const offset = Math.max(0, Math.floor(options?.offset ?? 0));
+      const order = options?.order ?? "asc";
+      await getCaseWithStageOrThrow(db, companyId, caseId);
+      const rows = await db
+        .select()
+        .from(pipelineCaseEvents)
+        .where(and(eq(pipelineCaseEvents.companyId, companyId), eq(pipelineCaseEvents.caseId, caseId)))
+        .orderBy(order === "desc" ? desc(pipelineCaseEvents.createdAt) : asc(pipelineCaseEvents.createdAt))
+        .limit(limit + 1)
+        .offset(offset);
+      const hasMore = rows.length > limit;
+      const items = hasMore ? rows.slice(0, limit) : rows;
+      return {
+        items,
+        pagination: {
+          limit,
+          offset,
+          nextOffset: hasMore ? offset + limit : null,
+          hasMore,
+          order,
+        },
+      };
     },
 
     async listCaseEvents(companyId: string, caseId: string) {
