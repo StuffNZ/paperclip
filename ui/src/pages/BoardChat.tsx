@@ -20,8 +20,9 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Activity, ArrowDown, History, MessageSquarePlus, Send, X } from "lucide-react";
+import { Activity, ArrowDown, History, MessageSquarePlus, X } from "lucide-react";
 import { ActivityFeed } from "../components/ActivityFeed";
+import { ChatComposer, type ChatComposerHandle } from "../components/ChatComposer";
 import { cn } from "../lib/utils";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
@@ -159,7 +160,7 @@ export function BoardChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const hasRestoredScrollRef = useRef(false);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<ChatComposerHandle>(null);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /** True when the user is scrolled away from the bottom AND new content
@@ -536,7 +537,7 @@ export function BoardChat() {
         );
       } finally {
         setSending(false);
-        inputRef.current?.focus();
+        composerRef.current?.focus();
       }
     },
     [sending, selectedCompanyId, boardIssueId, queryClient],
@@ -545,16 +546,6 @@ export function BoardChat() {
   const handleSend = useCallback(() => {
     sendMessage(input);
   }, [input, sendMessage]);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" && !e.shiftKey) {
-        e.preventDefault();
-        handleSend();
-      }
-    },
-    [handleSend],
-  );
 
   // NOTE: declared before the early return below — all hooks must run on
   // every render (Rules of Hooks). Placing it after the `!selectedCompanyId`
@@ -699,7 +690,7 @@ export function BoardChat() {
                             type="button"
                             onClick={() => {
                               setInput(chip.prompt);
-                              inputRef.current?.focus();
+                              composerRef.current?.focus();
                             }}
                             className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground transition-colors duration-150 hover:bg-accent hover:text-foreground"
                           >
@@ -826,35 +817,22 @@ export function BoardChat() {
             </button>
           )}
 
-          {/* Input */}
+          {/* Input — shared ChatComposer (PAP-95a), adopted bare: textarea + send.
+               No mode chip (the room has no task lifecycle). Sends on plain Enter
+               today; flipping to ⌘/Ctrl+Enter is pending board confirmation. */}
           <div className="shrink-0 px-6 pt-3 pb-5">
-            <div className="flex items-end gap-2 rounded-[10px] border border-border bg-card px-3 py-2 transition-colors duration-150 focus-within:border-muted-foreground/40">
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value.replace(/\r?\n/g, " "))}
-                onKeyDown={handleKeyDown}
-                placeholder="Ask anything about your company..."
-                rows={1}
-                wrap="off"
-                className="min-h-[22px] max-h-[140px] min-w-0 flex-1 resize-none overflow-x-auto whitespace-nowrap border-0 bg-transparent p-0 text-sm leading-6 outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
-                disabled={sending}
-              />
-              <button
-                type="button"
-                onClick={handleSend}
-                disabled={!input.trim() || sending}
-                aria-label="Send message"
-                className={cn(
-                  "grid h-7 w-7 shrink-0 place-items-center rounded-md transition-colors duration-150 disabled:cursor-not-allowed",
-                  input.trim() && !sending
-                    ? "bg-foreground text-background hover:opacity-90"
-                    : "bg-accent text-muted-foreground",
-                )}
-              >
-                <Send className="h-3.5 w-3.5" />
-              </button>
-            </div>
+            <ChatComposer
+              ref={composerRef}
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              placeholder="Ask anything about your company..."
+              singleLine
+              submitKey="enter"
+              submitting={sending}
+              disabled={sending}
+              sendLabel="Send message"
+            />
           </div>
         </div>
 
