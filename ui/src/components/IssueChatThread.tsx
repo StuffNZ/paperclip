@@ -1686,46 +1686,56 @@ function IssueChatAssistantMessage({
   if (isGenuineComment) {
     return (
       <div id={anchorId}>
-        <div className="group flex items-end gap-2 py-1.5">
-          {agentAvatar}
-          <div className="flex min-w-0 max-w-[85%] flex-col items-start">
-            <div className="mb-1 flex items-center gap-2 px-1">
-              <span className="text-sm font-medium text-foreground">{authorName}</span>
-              <SourceTrustBadge sourceTrust={sourceTrust} artifactLabel="comment" />
-              {followUpRequested ? (
-                <Badge variant="outline" className="text-[10px] uppercase tracking-[0.14em]">
-                  Follow-up
-                </Badge>
-              ) : null}
-            </div>
-            <div
-              className={cn(
-                "min-w-0 max-w-full overflow-hidden break-words rounded-2xl rounded-bl-[4px] px-4 py-2.5",
-                deleted ? "bg-muted/50 text-muted-foreground" : "bg-muted",
-              )}
-            >
-              {deleted ? (
-                <div className="text-sm italic text-muted-foreground">Comment deleted</div>
+        <div className="group flex flex-col items-start py-1.5">
+          {/* Icon + name together in a header ABOVE the bubble (PAP-95 rev 7). */}
+          <div className="mb-1 flex items-center gap-1.5 px-1">
+            <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+              {agentIcon ? (
+                <AgentIcon icon={agentIcon} className="h-4 w-4" />
               ) : (
-                <div className="min-w-0 max-w-full space-y-3">
-                  <IssueChatAssistantParts message={message} hasCoT={false} />
-                  {notices.length > 0 ? (
-                    <div className="space-y-2">
-                      {notices.map((notice, index) => (
-                        <div
-                          key={`${message.id}:notice:${index}`}
-                          className="rounded-sm border border-border/60 bg-accent/20 px-3 py-2 text-sm text-muted-foreground"
-                        >
-                          {notice}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
+                <Avatar size="sm" className="size-5">
+                  <AvatarFallback className="text-[10px]">{initialsForName(authorName)}</AvatarFallback>
+                </Avatar>
               )}
-            </div>
-            {!deleted ? messageActionBar : null}
+            </span>
+            <span className="text-sm font-medium text-foreground">{authorName}</span>
+            <SourceTrustBadge sourceTrust={sourceTrust} artifactLabel="comment" />
+            {followUpRequested ? (
+              <Badge variant="outline" className="text-[10px] uppercase tracking-[0.14em]">
+                Follow-up
+              </Badge>
+            ) : null}
           </div>
+          {/* Canonical conference-room agent bubble (BoardChat.tsx:712). */}
+          <div
+            className={cn(
+              "min-w-0 max-w-[85%] break-words px-3 py-2 text-sm overflow-x-auto overflow-y-visible [border-radius:14px_14px_14px_4px]",
+              deleted
+                ? "border border-border bg-muted/50 text-muted-foreground"
+                : "border border-border bg-card text-foreground",
+            )}
+          >
+            {deleted ? (
+              <div className="text-sm italic text-muted-foreground">Comment deleted</div>
+            ) : (
+              <div className="min-w-0 max-w-full space-y-3">
+                <IssueChatAssistantParts message={message} hasCoT={false} />
+                {notices.length > 0 ? (
+                  <div className="space-y-2">
+                    {notices.map((notice, index) => (
+                      <div
+                        key={`${message.id}:notice:${index}`}
+                        className="rounded-sm border border-border/60 bg-accent/20 px-3 py-2 text-sm text-muted-foreground"
+                      >
+                        {notice}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+          {!deleted ? messageActionBar : null}
         </div>
       </div>
     );
