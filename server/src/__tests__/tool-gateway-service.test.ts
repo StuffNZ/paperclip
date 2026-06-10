@@ -30,6 +30,7 @@ import {
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
+const originalToolActionSigningSecret = process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
 
 async function createRunFixture(db: ReturnType<typeof createDb>) {
   const company = await db.insert(companies).values({
@@ -94,6 +95,7 @@ describeEmbeddedPostgres("tool gateway service", () => {
   let tempDb: Awaited<ReturnType<typeof startEmbeddedPostgresTestDatabase>> | null = null;
 
   beforeAll(async () => {
+    process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET = "test-tool-action-signing-secret";
     tempDb = await startEmbeddedPostgresTestDatabase("paperclip-tool-gateway-");
     db = createDb(tempDb.connectionString);
   }, 20_000);
@@ -117,6 +119,11 @@ describeEmbeddedPostgres("tool gateway service", () => {
 
   afterAll(async () => {
     await tempDb?.cleanup();
+    if (originalToolActionSigningSecret === undefined) {
+      delete process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
+    } else {
+      process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET = originalToolActionSigningSecret;
+    }
   });
 
   it("gates write tools with an action request and executes only stored reviewed arguments once", async () => {
@@ -325,5 +332,63 @@ describeEmbeddedPostgres("tool gateway service", () => {
       metadata: { findings: ["ignore_previous_instructions", "reveal_system_prompt"] },
     });
     expect(serialized).not.toContain(maliciousContent);
+  });
+
+  it("passes original sensitive arguments to plugin executors while redacting stored summaries", async () => {
+    const { company, agent, run } = await createRunFixture(db);
+    let executedParameters: unknown;
+    const gateway = createToolGatewayService(db, {
+      pluginToolDispatcher: {
+        initialize: async () => {},
+        teardown: () => {},
+        listToolsForAgent: () => [
+          {
+            name: "fixture:read_status",
+            displayName: "Read status",
+            description: "Echoes parameters for executor assertions.",
+            parametersSchema: { type: "object" },
+            pluginId: "fixture-plugin",
+          },
+        ],
+        getTool: () => null,
+        executeTool: async (_name, parameters) => {
+          executedParameters = parameters;
+          return {
+            pluginId: "fixture-plugin",
+            toolName: "read_status",
+            result: { ok: true },
+          };
+        },
+        registerPluginTools: () => {},
+        unregisterPluginTools: () => {},
+        toolCount: () => 1,
+        getRegistry: () => {
+          throw new Error("not implemented");
+        },
+      },
+    });
+    await db.insert(toolPolicies).values({
+      companyId: company.id,
+      name: "Allow read fixture",
+      policyType: "allow",
+      selectors: { toolName: "fixture:read_status" },
+    });
+
+    await gateway.executePluginTool({
+      actor: { type: "agent", companyId: company.id, agentId: agent.id, runId: run.id },
+      tool: "fixture:read_status",
+      parameters: { query: "ok", apiKey: "sk-secret-value" },
+      runContext: { companyId: company.id, agentId: agent.id, runId: run.id },
+    });
+
+    expect(executedParameters).toEqual({ query: "ok", apiKey: "sk-secret-value" });
+
+    const [invocation] = await db.select().from(toolInvocations);
+    const [callEvent] = await db.select().from(toolCallEvents).where(eq(toolCallEvents.eventType, "call_completed"));
+    const [audit] = await db.select().from(activityLog).where(eq(activityLog.action, "tool_gateway.call_allowed"));
+    const serialized = JSON.stringify({ invocation, callEvent, audit });
+
+    expect(serialized).not.toContain("sk-secret-value");
+    expect(serialized).toContain("***REDACTED***");
   });
 });

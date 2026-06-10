@@ -41,12 +41,11 @@ function scanPromptInjection(value: unknown): string[] {
 }
 
 function signingSecret() {
-  return (
-    process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET?.trim()
-    || process.env.PAPERCLIP_AGENT_JWT_SECRET?.trim()
-    || process.env.BETTER_AUTH_SECRET?.trim()
-    || "paperclip-dev-tool-action-signing-secret"
-  );
+  const secret = process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET?.trim();
+  if (!secret) {
+    throw new Error("PAPERCLIP_TOOL_ACTION_SIGNING_SECRET is required for signed tool action approvals");
+  }
+  return secret;
 }
 
 export function canonicalToolArguments(value: unknown) {

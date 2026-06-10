@@ -1204,13 +1204,14 @@ export function createToolGatewayService(
 
       const tool = findTool(input.tool);
 
+      const requestedParameters = input.parameters ?? {};
       const argumentValidation = validateToolContent({
-        value: input.parameters ?? {},
+        value: requestedParameters,
         direction: "arguments",
         sensitiveMode: "redact",
         promptInjectionMode: "ignore",
       });
-      let effectiveParameters = argumentValidation.value;
+      let effectiveParameters = requestedParameters;
       let effectiveArgumentsSummary = argumentValidation.summary;
 
       if (input.approvedActionRequestId) {
@@ -1360,7 +1361,7 @@ export function createToolGatewayService(
           throw new ToolGatewayHttpError(409, "Tool action request was already consumed", "action_already_consumed");
         }
         invocationId = storedInvocation.id as typeof invocationId;
-        effectiveParameters = storedArgumentValidation.value;
+        effectiveParameters = storedParameters;
         effectiveArgumentsSummary = storedArgumentValidation.summary;
         await db
           .update(toolInvocations)
@@ -1649,8 +1650,9 @@ export function createToolGatewayService(
         throw new ToolGatewayHttpError(404, `Tool "${input.tool}" is not a plugin tool`, "tool_not_found");
       }
 
+      const requestedParameters = input.parameters ?? {};
       const argumentValidation = validateToolContent({
-        value: input.parameters ?? {},
+        value: requestedParameters,
         direction: "arguments",
         sensitiveMode: "redact",
         promptInjectionMode: "ignore",
@@ -1659,7 +1661,7 @@ export function createToolGatewayService(
       const decisionInput = policyInputForTool({
         session: sessionLike,
         tool,
-        parameters: argumentValidation.value,
+        parameters: requestedParameters,
         consumeRateLimit: true,
       });
       const accessDecision = await policyService.decide(decisionInput);
@@ -1677,7 +1679,7 @@ export function createToolGatewayService(
           actionRequest: recorded.actionRequest,
           session: sessionLike,
           tool,
-          parameters: argumentValidation.value,
+          parameters: requestedParameters,
           argumentsSummary: argumentValidation.summary,
           policyDecision: accessDecision,
         });
@@ -1740,7 +1742,7 @@ export function createToolGatewayService(
 
       const startedAt = Date.now();
       try {
-        const result = await pluginToolDispatcher.executeTool(input.tool, argumentValidation.value, input.runContext);
+        const result = await pluginToolDispatcher.executeTool(input.tool, requestedParameters, input.runContext);
         const resultValidation = validateToolContent({
           value: result,
           direction: "result",

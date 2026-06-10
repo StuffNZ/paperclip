@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   canonicalToolArguments,
   readSignedToolArguments,
@@ -9,6 +9,32 @@ import {
 } from "../services/tool-content-guards.js";
 
 describe("tool content guards", () => {
+  const originalToolActionSigningSecret = process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
+  const originalAgentJwtSecret = process.env.PAPERCLIP_AGENT_JWT_SECRET;
+  const originalAuthSecret = process.env.BETTER_AUTH_SECRET;
+
+  beforeEach(() => {
+    process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET = "test-tool-action-signing-secret";
+  });
+
+  afterEach(() => {
+    if (originalToolActionSigningSecret === undefined) {
+      delete process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
+    } else {
+      process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET = originalToolActionSigningSecret;
+    }
+    if (originalAgentJwtSecret === undefined) {
+      delete process.env.PAPERCLIP_AGENT_JWT_SECRET;
+    } else {
+      process.env.PAPERCLIP_AGENT_JWT_SECRET = originalAgentJwtSecret;
+    }
+    if (originalAuthSecret === undefined) {
+      delete process.env.BETTER_AUTH_SECRET;
+    } else {
+      process.env.BETTER_AUTH_SECRET = originalAuthSecret;
+    }
+  });
+
   it("signs canonical arguments and rejects tampered arguments", () => {
     const canonicalArguments = canonicalToolArguments({ body: "hello", noteId: "n1" });
     const signedArguments = signToolArguments({
@@ -38,6 +64,20 @@ describe("tool content guards", () => {
       invocationId: "invocation-1",
       toolName: "mcp-remote-fixture:update_note",
     })).toEqual({ body: "hello", noteId: "n1" });
+  });
+
+  it("requires a dedicated tool action signing secret", () => {
+    delete process.env.PAPERCLIP_TOOL_ACTION_SIGNING_SECRET;
+    process.env.PAPERCLIP_AGENT_JWT_SECRET = "agent-jwt-secret";
+    process.env.BETTER_AUTH_SECRET = "auth-secret";
+
+    expect(() =>
+      signToolArguments({
+        invocationId: "invocation-1",
+        toolName: "mcp-remote-fixture:update_note",
+        canonicalArguments: canonicalToolArguments({ body: "hello" }),
+      }),
+    ).toThrow("PAPERCLIP_TOOL_ACTION_SIGNING_SECRET");
   });
 
   it("redacts sensitive argument values before summarizing them", () => {
