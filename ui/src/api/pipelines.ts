@@ -154,6 +154,8 @@ export interface PipelineCasePendingSuggestion {
 
 export interface PipelineCaseDetail {
   case: PipelineCase;
+  /** Derived from the pipeline (invisible/internal): used for display + ingest checks. */
+  caseType?: string;
   stage: PipelineStage;
   pipeline: PipelineDetail;
   allowedNextStages: PipelineStage[];

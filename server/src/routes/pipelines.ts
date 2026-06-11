@@ -45,7 +45,7 @@ import {
 import { accessService } from "../services/access.js";
 import { issueService } from "../services/issues.js";
 import { assertCompanyAccess } from "./authz.js";
-import { computePipelineHealth, type PipelineHealthStageInput } from "@paperclipai/shared";
+import { computePipelineHealth, deriveCaseType, type PipelineHealthStageInput } from "@paperclipai/shared";
 
 /** Per-stage instructions document keys look like `stage-instructions:{stageId}`. */
 const STAGE_INSTRUCTIONS_PREFIX = "stage-instructions:";
@@ -1386,6 +1386,9 @@ async function getCaseDetail(db: Db, companyId: string, caseId: string) {
   ]);
   return {
     ...row,
+    // Derived, invisible: a case's "type" is simply which pipeline it lives in.
+    // Used internally for display and ingest sanity-checks; not a user field.
+    caseType: deriveCaseType(row.pipeline),
     allowedNextStages,
     links,
     blockers,

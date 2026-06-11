@@ -27,6 +27,11 @@ export {
   type PipelineHealthWarningCode,
 } from "./pipeline-health.js";
 export {
+  caseTypeMatchesPipeline,
+  deriveCaseType,
+  type CaseTypePipelineRef,
+} from "./pipeline-case-type.js";
+export {
   asBoolean,
   asString,
   asStringArray,
