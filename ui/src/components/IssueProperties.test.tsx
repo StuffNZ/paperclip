@@ -26,6 +26,10 @@ const mockProjectsApi = vi.hoisted(() => ({
   list: vi.fn(),
 }));
 
+const mockExecutionWorkspacesApi = vi.hoisted(() => ({
+  controlRuntimeCommands: vi.fn(),
+}));
+
 const mockIssuesApi = vi.hoisted(() => ({
   list: vi.fn(),
   listLabels: vi.fn(),
@@ -48,6 +52,10 @@ vi.mock("../api/agents", () => ({
 
 vi.mock("../api/projects", () => ({
   projectsApi: mockProjectsApi,
+}));
+
+vi.mock("../api/execution-workspaces", () => ({
+  executionWorkspacesApi: mockExecutionWorkspacesApi,
 }));
 
 vi.mock("../api/issues", () => ({
@@ -379,6 +387,7 @@ describe("IssueProperties", () => {
     mockAgentsApi.adapterModels.mockResolvedValue([]);
     mockAgentsApi.adapterModelProfiles.mockResolvedValue([]);
     mockProjectsApi.list.mockResolvedValue([]);
+    mockExecutionWorkspacesApi.controlRuntimeCommands.mockReset();
     mockIssuesApi.list.mockResolvedValue([]);
     mockIssuesApi.listLabels.mockResolvedValue([]);
     mockIssuesApi.createLabel.mockResolvedValue(createLabel({
@@ -722,9 +731,17 @@ describe("IssueProperties", () => {
     act(() => root.unmount());
   });
 
-  it("shows a green service link above the workspace row for a live non-main workspace", async () => {
+  it("shows workspace runtime controls below the workspace row for a non-main workspace", async () => {
     mockProjectsApi.list.mockResolvedValue([createProject()]);
     const serviceUrl = "http://127.0.0.1:62475";
+    const updatedWorkspace = createExecutionWorkspace({
+      mode: "isolated_workspace",
+      runtimeServices: [createRuntimeService({ url: serviceUrl, status: "stopped", stoppedAt: new Date("2026-04-06T12:06:00.000Z") })],
+    });
+    mockExecutionWorkspacesApi.controlRuntimeCommands.mockResolvedValue({
+      workspace: updatedWorkspace,
+      operation: {},
+    });
     const root = renderProperties(container, {
       issue: createIssue({
         projectId: "project-1",
@@ -732,7 +749,17 @@ describe("IssueProperties", () => {
         executionWorkspaceId: "workspace-1",
         currentExecutionWorkspace: createExecutionWorkspace({
           mode: "isolated_workspace",
-          runtimeServices: [createRuntimeService({ url: serviceUrl, status: "running" })],
+          config: {
+            environmentId: null,
+            provisionCommand: null,
+            teardownCommand: null,
+            cleanupCommand: null,
+            desiredState: null,
+            workspaceRuntime: {
+              services: [{ name: "web", command: "pnpm dev" }],
+            },
+          },
+          runtimeServices: [createRuntimeService({ url: serviceUrl, status: "running", configIndex: 0 })],
         }),
       }),
       childIssues: [],
@@ -740,13 +767,25 @@ describe("IssueProperties", () => {
     });
     await flush();
 
-    const serviceLink = container.querySelector(`a[href="${serviceUrl}"]`);
-    expect(serviceLink).not.toBeNull();
-    expect(serviceLink?.getAttribute("target")).toBe("_blank");
-    expect(serviceLink?.className).toContain("text-emerald");
-    expect((container.textContent ?? "").indexOf("Service")).toBeLessThan(
-      (container.textContent ?? "").indexOf("Workspace"),
+    expect(container.querySelector(`a[href="${serviceUrl}"]`)).not.toBeNull();
+    expect((container.textContent ?? "").indexOf("Workspace")).toBeLessThan(
+      (container.textContent ?? "").indexOf("Service"),
     );
+    const stopButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.trim() === "Stop");
+    expect(stopButton).not.toBeUndefined();
+
+    await act(async () => {
+      stopButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+
+    expect(mockExecutionWorkspacesApi.controlRuntimeCommands).toHaveBeenCalledWith(
+      "workspace-1",
+      "stop",
+      expect.objectContaining({ action: "stop", runtimeServiceId: "service-1" }),
+    );
+    expect(container.textContent).toContain("Workspace service stopped.");
 
     act(() => root.unmount());
   });
@@ -793,6 +832,41 @@ describe("IssueProperties", () => {
     expect(container.textContent).not.toContain("View workspace tasks");
     expect(workspaceLink).not.toBeUndefined();
     expect(workspaceLink?.getAttribute("href")).toBe("/execution-workspaces/workspace-1");
+
+    act(() => root.unmount());
+  });
+
+  it("copies branch and folder values with visible feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const root = renderProperties(container, {
+      issue: createIssue({
+        executionWorkspaceId: "workspace-1",
+        currentExecutionWorkspace: createExecutionWorkspace({
+          branchName: "pap-1-workspace",
+          cwd: "/tmp/paperclip/PAP-1",
+        }),
+      }),
+      childIssues: [],
+      onUpdate: vi.fn(),
+    });
+    await flush();
+
+    const branchCopyButton = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Copy pap-1-workspace to clipboard"]',
+    );
+    expect(branchCopyButton).not.toBeNull();
+
+    await act(async () => {
+      branchCopyButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+
+    expect(writeText).toHaveBeenCalledWith("pap-1-workspace");
+    expect(container.textContent).toContain("Copied");
 
     act(() => root.unmount());
   });
