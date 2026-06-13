@@ -772,13 +772,17 @@ describe("IssueProperties", () => {
     });
     await flush();
 
-    expect(container.querySelector(`a[href="${serviceUrl}"]`)).not.toBeNull();
+    const serviceLink = container.querySelector(`a[href="${serviceUrl}"]`);
+    expect(serviceLink).not.toBeNull();
+    expect(serviceLink?.className).toContain("sm:self-start");
+    expect(serviceLink?.className).not.toContain("sm:self-end");
     expect((container.textContent ?? "").indexOf("Workspace")).toBeLessThan(
       (container.textContent ?? "").indexOf("Service"),
     );
-    const stopButton = Array.from(container.querySelectorAll("button"))
-      .find((button) => button.textContent?.trim() === "Stop");
+    const stopButton = container.querySelector<HTMLButtonElement>('button[aria-label="Stop"]');
     expect(stopButton).not.toBeUndefined();
+    expect(stopButton?.getAttribute("data-size")).toBe("icon-xs");
+    expect(stopButton?.getAttribute("data-variant")).toBe("outline");
 
     await act(async () => {
       stopButton!.dispatchEvent(new MouseEvent("click", { bubbles: true }));

@@ -2220,6 +2220,8 @@ export function IssueProperties({
                     pendingRequest={pendingWorkspaceRuntimeAction}
                     onAction={(request) => controlWorkspaceRuntime.mutate(request)}
                     square
+                    align="start"
+                    iconOnly
                   />
                   {runtimeActionMessage ? (
                     <span className="text-xs text-muted-foreground" role="status">{runtimeActionMessage}</span>
