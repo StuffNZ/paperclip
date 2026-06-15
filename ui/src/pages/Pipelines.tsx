@@ -154,6 +154,15 @@ function itemCountLabel(count: number) {
   return `${count} ${count === 1 ? "item" : "items"}`;
 }
 
+function currentStageAutomation(stage: PipelineStage) {
+  const onEnter = stage.config?.onEnter;
+  if (!onEnter || typeof onEnter !== "object" || Array.isArray(onEnter)) return null;
+  const config = onEnter as Record<string, unknown>;
+  return config.type === "run_routine" && typeof config.routineId === "string" && config.routineId.trim()
+    ? { routineId: config.routineId }
+    : null;
+}
+
 export function Pipelines() {
   const params = useParams<{ pipelineId?: string }>();
   const location = useLocation();
@@ -1685,6 +1694,15 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
     onError: () => pushToast({ title: "Could not acknowledge the change", tone: "error" }),
   });
 
+  const rerunCurrentStageAutomation = useMutation({
+    mutationFn: () => pipelinesApi.rerunCurrentStageAutomation(caseId),
+    onSuccess: async () => {
+      await invalidateItem();
+      pushToast({ title: "Stage automation re-run started", tone: "success" });
+    },
+    onError: () => pushToast({ title: "Could not re-run the stage automation", tone: "error" }),
+  });
+
   const removeStage = useMemo(
     () => stages.find((stage) => stage.kind === "cancelled") ?? stages.find((stage) => stage.key === "cancelled") ?? null,
     [stages],
@@ -1717,6 +1735,7 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
   const itemFields = displayPipelineItemFields(detail.case.fields).filter((field) => !referenceKeys.has(field.key));
   const banner = getPendingTransitionBannerState(detail.case, stageLookup);
   const statusLabel = humanizePipelineItemStatus(detail.case.terminalKind ?? detail.stage.kind);
+  const stageAutomation = currentStageAutomation(detail.stage);
   const childRows = normalizePipelineChildRows(children.data);
   const eventRows = events.data?.items ?? [];
   const waitingChildren = getWaitingChildren(childRows);
@@ -1760,6 +1779,28 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
             <span className="rounded-sm border border-border px-2 py-0.5 text-xs font-medium text-muted-foreground">
               {statusLabel}
             </span>
+            <div className="flex items-center gap-1 text-sm text-muted-foreground">
+              Stage: <span className="font-medium text-foreground">{detail.stage.name}</span>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Stage actions">
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem
+                    disabled={!stageAutomation || rerunCurrentStageAutomation.isPending}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      rerunCurrentStageAutomation.mutate();
+                    }}
+                  >
+                    <Loader2 className={cn("h-4 w-4", rerunCurrentStageAutomation.isPending ? "animate-spin" : "hidden")} />
+                    Re-run stage automation
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </div>
           {detail.case.summary ? <p className="mt-2 max-w-3xl text-sm text-muted-foreground">{detail.case.summary}</p> : null}
           {detail.parentCase ? (

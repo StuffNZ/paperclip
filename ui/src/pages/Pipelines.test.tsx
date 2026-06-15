@@ -10,6 +10,7 @@ import type {
   PipelineAttentionCaseRef,
   PipelineAttentionFeed,
   PipelineBatchIngestResult,
+  PipelineDetail,
   PipelineIntakeField,
   PipelineListItem,
   PipelineReviewCaseRow,
@@ -51,6 +52,7 @@ const mockPipelinesApi = vi.hoisted(() => ({
   updateCase: vi.fn(),
   resolveSuggestion: vi.fn(),
   transitionCase: vi.fn(),
+  rerunCurrentStageAutomation: vi.fn(),
   ingestCasesBatch: vi.fn(),
   listAttention: vi.fn(),
   listReviewCases: vi.fn(),
@@ -225,7 +227,7 @@ describe("pipeline add-items helpers", () => {
   });
 });
 
-const pipeline = {
+const pipeline: PipelineDetail = {
   id: "pipeline-1",
   companyId: "company-1",
   key: "content",
@@ -239,9 +241,9 @@ const pipeline = {
   createdAt: "2026-06-10T12:00:00.000Z",
   updatedAt: "2026-06-10T12:00:00.000Z",
   stages: [
-    { id: "stage-intake", pipelineId: "pipeline-1", key: "intake", name: "Intake", kind: "working", position: 100 },
-    { id: "stage-review", pipelineId: "pipeline-1", key: "review", name: "Review", kind: "review", position: 200 },
-    { id: "stage-cancelled", pipelineId: "pipeline-1", key: "cancelled", name: "Removed", kind: "cancelled", position: 1000 },
+    { id: "stage-intake", pipelineId: "pipeline-1", key: "intake", name: "Intake", kind: "working", position: 100, config: null },
+    { id: "stage-review", pipelineId: "pipeline-1", key: "review", name: "Review", kind: "review", position: 200, config: null },
+    { id: "stage-cancelled", pipelineId: "pipeline-1", key: "cancelled", name: "Removed", kind: "cancelled", position: 1000, config: null },
   ],
   transitions: [],
 };
@@ -387,6 +389,37 @@ describe("PipelineItemDetailView", () => {
       issueId: "issue-1",
       variant: "embedded",
     }));
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
+  it("shows the current stage and can re-run its entry automation", async () => {
+    mockPipelinesApi.rerunCurrentStageAutomation.mockResolvedValue({});
+    const detail = itemDetail({
+      stageId: "stage-review",
+      pendingSuggestion: null,
+    });
+    detail.stage = {
+      ...pipeline.stages[1],
+      name: "Content strategy",
+      config: { onEnter: { type: "run_routine", routineId: "routine-1" } },
+    };
+    const { container, root } = await renderItemPage(detail, [], { children: [], events: [] });
+
+    expect(container.textContent).toContain("Stage: Content strategy");
+    const rerunButton = Array.from(container.querySelectorAll("button"))
+      .find((button) => button.textContent?.includes("Re-run stage automation"));
+    expect(rerunButton).not.toBeNull();
+
+    await act(async () => {
+      rerunButton!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(mockPipelinesApi.rerunCurrentStageAutomation).toHaveBeenCalledWith("item-1");
+    expect(mockPushToast).toHaveBeenCalledWith({ title: "Stage automation re-run started", tone: "success" });
 
     act(() => {
       root.unmount();

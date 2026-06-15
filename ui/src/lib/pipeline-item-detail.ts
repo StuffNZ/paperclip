@@ -255,7 +255,10 @@ export function formatPipelineItemEvent(event: PipelineCaseEvent, stages?: Stage
   const kind = event.type.startsWith("case.") ? event.type.slice("case.".length) : event.type;
   const payload = event.payload ?? {};
   if (kind === "ingested") return "Item added.";
-  if (kind === "updated") return "Item details updated.";
+  if (kind === "updated") {
+    if (payload.action === "stage_automation_rerun_requested") return "Stage automation re-run requested.";
+    return "Item details updated.";
+  }
   if (kind === "transitioned") {
     const from = stageName(event, stages, "from");
     const to = stageName(event, stages, "to");

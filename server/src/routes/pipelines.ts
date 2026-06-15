@@ -1554,6 +1554,13 @@ export function pipelineRoutes(db: Db, options: Parameters<typeof pipelineServic
     res.json(await svc.retryAutomation({ companyId, caseId, automationId, actor }));
   });
 
+  router.post("/cases/:caseId/automation/current-stage/rerun", async (req, res) => {
+    const caseId = req.params.caseId as string;
+    const companyId = await assertCaseAccess(db, req, caseId);
+    const actor = actorForMutation(req);
+    res.json(await svc.rerunCurrentStageAutomation({ companyId, caseId, actor }));
+  });
+
   return router;
 }
 

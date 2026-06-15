@@ -2176,6 +2176,59 @@ describeEmbeddedPostgres("pipelineService", () => {
     expect(events.map((event) => event.type)).toContain("automation_executed");
   });
 
+  it("reruns current stage automation for an item that never created an automation ledger", async () => {
+    const company = await seedCompany();
+    const routine = await seedRoutine(company.id, "Manual stage automation");
+    const pipeline = await svc.createPipeline({
+      companyId: company.id,
+      key: "manual-rerun",
+      name: "Manual rerun",
+      actor: userActor,
+      stages: [
+        { key: "intake", name: "Intake", kind: "open" },
+        { key: "drafting", name: "Drafting", kind: "working", config: { onEnter: { id: "draft-on-enter", type: "run_routine", routineId: routine.id } } },
+        { key: "done", name: "Done", kind: "done" },
+        { key: "cancelled", name: "Cancelled", kind: "cancelled" },
+      ],
+    });
+    const [drafting] = await db
+      .select()
+      .from(pipelineStages)
+      .where(eq(pipelineStages.key, "drafting"));
+    const [staleCase] = await db.insert(pipelineCases).values({
+      companyId: company.id,
+      pipelineId: pipeline.id,
+      stageId: drafting!.id,
+      caseKey: "stale",
+      title: "Stale item",
+      fields: { release: "v1" },
+    }).returning();
+
+    const result = await svc.rerunCurrentStageAutomation({
+      companyId: company.id,
+      caseId: staleCase!.id,
+      actor: userActor,
+    });
+
+    expect(result.automationLedger.automationId).toBe("draft-on-enter");
+    expect(result.automationExecution.status).toBe("succeeded");
+    const ledgers = await db.select().from(pipelineAutomationExecutions).where(eq(pipelineAutomationExecutions.caseId, staleCase!.id));
+    expect(ledgers).toHaveLength(1);
+    expect(ledgers[0]!.executionIssueId).toBeTruthy();
+    const runs = await db.select().from(routineRuns);
+    expect(runs).toHaveLength(1);
+    const links = await db.select().from(pipelineCaseIssueLinks).where(eq(pipelineCaseIssueLinks.caseId, staleCase!.id));
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ issueId: ledgers[0]!.executionIssueId, role: "automation" });
+    const events = await db
+      .select()
+      .from(pipelineCaseEvents)
+      .where(eq(pipelineCaseEvents.caseId, staleCase!.id))
+      .orderBy(pipelineCaseEvents.createdAt);
+    expect(events.map((event) => event.type)).toEqual(["updated", "automation_executed"]);
+    expect(events[0]!.payload).toMatchObject({ action: "stage_automation_rerun_requested", automationId: "draft-on-enter" });
+  });
+
   it("rejects cross-company stage automation routines at save and execution", async () => {
     const company = await seedCompany();
     const otherCompany = await seedCompany();

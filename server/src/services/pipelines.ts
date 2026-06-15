@@ -3207,6 +3207,50 @@ export function pipelineService(db: Db, deps: { heartbeat?: IssueAssignmentWakeu
       return executeAutomationLedger(execution.id, input.actor);
     },
 
+    async rerunCurrentStageAutomation(input: {
+      companyId: string;
+      caseId: string;
+      actor: PipelineActor;
+    }) {
+      const ledger = await db.transaction(async (tx) => {
+        const detail = await getCaseWithStageForUpdateOrThrow(tx, input.companyId, input.caseId);
+        const automation = stageAutomation(detail.stage);
+        if (!automation) {
+          throw unprocessable("Current stage does not have entry automation configured", {
+            code: "automation_not_configured",
+          });
+        }
+        const event = await writeCaseEvent(tx, {
+          companyId: input.companyId,
+          caseId: input.caseId,
+          type: "updated",
+          actor: input.actor,
+          toStageId: detail.stage.id,
+          payload: {
+            action: "stage_automation_rerun_requested",
+            automationId: automation.id,
+            routineId: automation.routineId,
+            stageId: detail.stage.id,
+            stageKey: detail.stage.key,
+          },
+        });
+        const nextLedger = await enqueueStageAutomationLedger(tx, {
+          companyId: input.companyId,
+          caseId: input.caseId,
+          stage: detail.stage,
+          eventId: event.id,
+        });
+        if (!nextLedger) {
+          throw unprocessable("Current stage does not have entry automation configured", {
+            code: "automation_not_configured",
+          });
+        }
+        return nextLedger;
+      });
+      const automationExecution = await executeAutomationLedger(ledger.id, input.actor);
+      return { automationLedger: ledger, automationExecution };
+    },
+
     async validateStageAutomationConfig(companyId: string, config?: PipelineStageConfig | null) {
       return validateStageAutomationConfig(companyId, config);
     },
