@@ -228,6 +228,42 @@ describe("PipelineSettings", () => {
     });
     vi.spyOn(pipelinesApi, "update").mockResolvedValue(makePipeline());
     vi.spyOn(pipelinesApi, "getHealth").mockResolvedValue({ pipelineId: "pipeline-1", warnings: [], ok: true });
+    vi.spyOn(pipelinesApi, "list").mockResolvedValue([
+      makePipeline(),
+      {
+        ...makePipeline(),
+        id: "pipeline-2",
+        key: "piece_pipeline",
+        name: "Piece pipeline",
+        stages: [
+          {
+            id: "piece-stage-1",
+            pipelineId: "pipeline-2",
+            key: "incoming",
+            name: "Incoming",
+            kind: "working",
+            position: 100,
+            config: {
+              variables: [
+                {
+                  key: "release",
+                  label: "Release",
+                  type: "text",
+                  options: [],
+                  required: true,
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+    vi.spyOn(pipelinesApi, "getIntakeForm").mockResolvedValue({
+      pipelineId: "pipeline-2",
+      stageId: "piece-stage-1",
+      stageName: "Incoming",
+      fields: [{ key: "release", label: "Release", type: "text", required: true }],
+    });
     vi.spyOn(agentsApi, "list").mockResolvedValue([
       { id: "agent-1", name: "QA Agent", role: "QA", status: "active" } as unknown as Agent,
     ]);
@@ -279,6 +315,29 @@ describe("PipelineSettings", () => {
     expect(container.textContent).toContain("runs these instructions, then moves the item to the next step.");
     // The instructions body is the mocked MarkdownEditor, not a plain Textarea.
     expect(container.querySelector('[aria-label="Stage instructions"]')).not.toBeNull();
+
+    flushSync(() => {
+      root.unmount();
+    });
+    queryClient.clear();
+  });
+
+  it("renders break-into-pieces settings in Automation instead of Advanced", async () => {
+    const { container, root, queryClient } = renderSettings();
+    await flushQueries();
+
+    flushSync(() => {
+      findButton(container, "Automation")!.click();
+    });
+
+    expect(container.textContent).toContain("Break into smaller pieces");
+
+    flushSync(() => {
+      findButton(container, "Advanced")!.click();
+    });
+
+    expect(container.textContent).not.toContain("Break into smaller pieces");
+    expect(container.textContent).toContain("Children");
 
     flushSync(() => {
       root.unmount();

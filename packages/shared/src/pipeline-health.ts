@@ -164,22 +164,6 @@ function readVariableName(entry: Record<string, unknown>): string | null {
   return key;
 }
 
-function readVariableLabel(entry: Record<string, unknown>, fallback: string): string {
-  const label = typeof entry.label === "string" && entry.label.trim() ? entry.label.trim() : null;
-  return label ?? fallback;
-}
-
-function isRequired(entry: Record<string, unknown>): boolean {
-  return entry.required === true;
-}
-
-function hasDefaultValue(entry: Record<string, unknown>): boolean {
-  const value = entry.defaultValue;
-  if (value === undefined || value === null) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  return typeof value === "number" || typeof value === "boolean";
-}
-
 function readBreakdownConfig(config: StageConfig) {
   const raw = config.breakdown;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -377,26 +361,9 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
       }
     }
 
-    // 7. Required details that were never filled in, so the step can't run.
-    // Only stages that actually run instructions (an assigned teammate or an
-    // on-enter automation) need values up front — on entry stages the same
-    // variables are the intake form, filled per item, so an empty default is
-    // the normal state, not a misconfiguration.
-    const runsInstructions = assigneeAgentId !== null || hasOnEnterRoutineAutomation(config);
-    const variables = runsInstructions && Array.isArray(config.variables) ? config.variables : [];
-    for (const raw of variables) {
-      if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-      const entry = raw as Record<string, unknown>;
-      const name = readVariableName(entry);
-      if (!name) continue;
-      if (isRequired(entry) && !hasDefaultValue(entry)) {
-        warnings.push({
-          ...anchor,
-          code: "unset_required_variable",
-          message: `"${readVariableLabel(entry, name)}" is empty. Fill it in so this step can run.`,
-        });
-      }
-    }
+    // 7. Required stage variables are item inputs, not settings defaults.
+    // Missing per-item values are validated when work enters or runs through
+    // the pipeline; a blank default in settings is a normal configuration.
   }
 
   for (const failure of input.failedAutomations ?? []) {

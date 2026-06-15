@@ -283,7 +283,7 @@ describe("computePipelineHealth", () => {
     ]);
   });
 
-  it("warns when a required variable has no default value on a stage that runs instructions", () => {
+  it("does not warn when a required automation variable has no default value", () => {
     const report = computePipelineHealth(
       baseInput([
         stage({
@@ -298,10 +298,7 @@ describe("computePipelineHealth", () => {
         }),
       ]),
     );
-    const warning = report.warnings.find((w) => w.code === "unset_required_variable");
-    expect(warning?.message).toBe('"Release notes" is empty. Fill it in so this step can run.');
-    // The optional variable does not warn.
-    expect(report.warnings.filter((w) => w.code === "unset_required_variable")).toHaveLength(1);
+    expect(report.warnings.map((warning) => warning.code)).not.toContain("unset_required_variable");
   });
 
   it("adds linked warnings for failed automation on live items", () => {
@@ -335,7 +332,7 @@ describe("computePipelineHealth", () => {
     });
   });
 
-  it("accepts the legacy { key } variable shape", () => {
+  it("does not warn about required variables with the legacy { key } shape", () => {
     const report = computePipelineHealth(
       baseInput([
         stage({
@@ -344,7 +341,7 @@ describe("computePipelineHealth", () => {
         }),
       ]),
     );
-    expect(report.warnings.find((w) => w.code === "unset_required_variable")?.message).toContain("topic");
+    expect(report.warnings.map((warning) => warning.code)).not.toContain("unset_required_variable");
   });
 
   it("does not warn about required variables on an entry stage with no instructions to run", () => {
