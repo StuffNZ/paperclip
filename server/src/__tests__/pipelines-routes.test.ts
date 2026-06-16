@@ -585,7 +585,6 @@ describeEmbeddedPostgres("pipeline routes", () => {
             position: 100,
             config: {
               variables: [
-                { name: "release", label: "Release", type: "text", required: true },
                 { name: "risk", label: "Risk", type: "select", options: ["low", "high"], required: true },
               ],
             },

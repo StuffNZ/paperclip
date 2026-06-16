@@ -223,7 +223,7 @@ describe("computePipelineHealth", () => {
               targetPipelineId: "pipeline-2",
               targetStageKey: "assets",
               pieceNoun: "asset",
-              inheritFields: ["topic"],
+              inheritFields: ["topic", "releaseTag", "featureAngle"],
               waitForPieces: true,
               whenFinishedMoveTo: "review",
             },
@@ -278,7 +278,6 @@ describe("computePipelineHealth", () => {
     expect(report.warnings.map((warning) => warning.code)).toEqual([
       "breakdown_target_missing",
       "breakdown_no_wait",
-      "breakdown_field_mismatch",
       "breakdown_target_not_entry_safe",
     ]);
   });

@@ -25,7 +25,6 @@ export type PipelineHealthWarningCode =
   | "missing_stage_reference"
   | "breakdown_target_missing"
   | "breakdown_no_wait"
-  | "breakdown_field_mismatch"
   | "breakdown_target_not_entry_safe"
   | "unset_required_variable";
 
@@ -157,13 +156,6 @@ function automationAssigneeAgentId(config: StageConfig): string | null {
     : null;
 }
 
-function readVariableName(entry: Record<string, unknown>): string | null {
-  const name = typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : null;
-  if (name) return name;
-  const key = typeof entry.key === "string" && entry.key.trim() ? entry.key.trim() : null;
-  return key;
-}
-
 function readBreakdownConfig(config: StageConfig) {
   const raw = config.breakdown;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -193,17 +185,6 @@ function readBreakdownConfig(config: StageConfig) {
     waitForPieces: record.waitForPieces === undefined ? config.requireChildrenTerminal === true : record.waitForPieces === true,
     whenFinishedMoveTo,
   };
-}
-
-function intakeFieldKeys(stage: PipelineHealthStageRef | undefined) {
-  const config = asConfig(stage?.config);
-  const variables = Array.isArray(config.variables) ? config.variables : [];
-  return new Set(variables.flatMap((raw) => {
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
-    const entry = raw as Record<string, unknown>;
-    const name = readVariableName(entry);
-    return name ? [name] : [];
-  }));
 }
 
 export function computePipelineHealth(input: PipelineHealthInput): PipelineHealthReport {
@@ -313,15 +294,6 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
             ...anchor,
             code: "breakdown_no_wait",
             message: `This step creates ${breakdown.pieceNoun}s but does not wait for them before moving on. Turn on waiting if the next step depends on the pieces finishing.`,
-          });
-        }
-        const targetKeys = intakeFieldKeys(targetStage);
-        const missingInherited = breakdown.inheritFields.filter((field) => !targetKeys.has(field));
-        if (missingInherited.length > 0) {
-          warnings.push({
-            ...anchor,
-            code: "breakdown_field_mismatch",
-            message: `Some copied details do not exist on the destination form: ${missingInherited.join(", ")}. Update the destination form or stop copying them.`,
           });
         }
         const targetConfig = asConfig(targetStage.config);
