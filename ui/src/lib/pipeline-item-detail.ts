@@ -106,6 +106,29 @@ export function displayPipelineItemFields(fields: Record<string, unknown> | null
     }));
 }
 
+export type PipelineItemDisplayField = ReturnType<typeof displayPipelineItemFields>[number];
+
+const LONG_FIELD_CHARACTER_THRESHOLD = 180;
+
+export function isLongPipelineItemField(field: Pick<PipelineItemDisplayField, "value">) {
+  const value = field.value.trim();
+  if (!value || value === "None") return false;
+  return value.includes("\n") || value.length >= LONG_FIELD_CHARACTER_THRESHOLD;
+}
+
+export function splitPipelineItemFields(fields: PipelineItemDisplayField[]) {
+  const shortFields: PipelineItemDisplayField[] = [];
+  const longFields: PipelineItemDisplayField[] = [];
+  for (const field of fields) {
+    if (isLongPipelineItemField(field)) {
+      longFields.push(field);
+    } else {
+      shortFields.push(field);
+    }
+  }
+  return { shortFields, longFields };
+}
+
 function treeNodeToChildRow(node: PipelineCaseTreeNode): PipelineChildRow | null {
   const pipelineId = node.pipeline?.id;
   const stage = node.stage;

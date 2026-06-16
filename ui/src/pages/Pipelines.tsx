@@ -74,6 +74,7 @@ import {
   changedNoticeFromEvents,
   itemHasChangedNotice,
   normalizePipelineChildRows,
+  splitPipelineItemFields,
 } from "../lib/pipeline-item-detail";
 import { extractWorkReferences, referenceFieldKeys } from "../lib/pipeline-references";
 import { pieceNounPlural, readStageBreakdown } from "../lib/pipeline-breakdown";
@@ -1854,7 +1855,9 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
 
   const workReferences = extractWorkReferences(detail.case);
   const referenceKeys = referenceFieldKeys(detail.case.fields);
-  const itemFields = displayPipelineItemFields(detail.case.fields).filter((field) => !referenceKeys.has(field.key));
+  const { shortFields: itemFields, longFields: mainPaneFields } = splitPipelineItemFields(
+    displayPipelineItemFields(detail.case.fields).filter((field) => !referenceKeys.has(field.key)),
+  );
   const banner = getPendingTransitionBannerState(detail.case, stageLookup);
   const statusLabel = humanizePipelineItemStatus(detail.case.terminalKind ?? detail.stage.kind);
   const stageAutomation = currentStageAutomation(detail.stage);
@@ -2057,6 +2060,14 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
               </MarkdownBody>
             </FoldCurtain>
           ) : null}
+
+          {mainPaneFields.map((field) => (
+            <DetailSection key={field.key} title={field.label}>
+              <MarkdownBody className="py-3 text-[15px] leading-7 text-foreground">
+                {field.value}
+              </MarkdownBody>
+            </DetailSection>
+          ))}
 
           <LinkedIssueAssetsSection
             groups={linkedIssueAssets.data ?? []}

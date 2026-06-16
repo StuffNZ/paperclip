@@ -461,6 +461,34 @@ describe("PipelineItemDetailView", () => {
     });
   });
 
+  it("renders long dynamic item fields as markdown in the main pane instead of sidebar details", async () => {
+    const { container, root } = await renderItemPage(itemDetail({
+      fields: {
+        audience: "Operators",
+        reviewerOpenQuestions: [
+          "### Reviewer open questions",
+          "",
+          "- Does this need a source?",
+          "- Should we mention launch risk?",
+        ].join("\n"),
+      },
+    }), [], { children: [], events: [] });
+
+    const main = container.querySelector("main");
+    const aside = container.querySelector("aside");
+    expect(main?.textContent).toContain("Reviewer open questions");
+    expect(main?.textContent).toContain("Does this need a source?");
+    expect(main?.querySelector("h3")?.textContent).toBe("Reviewer open questions");
+    expect(aside?.textContent).toContain("Audience");
+    expect(aside?.textContent).toContain("Operators");
+    expect(aside?.textContent).not.toContain("Reviewer open questions");
+    expect(aside?.textContent).not.toContain("Does this need a source?");
+
+    act(() => {
+      root.unmount();
+    });
+  });
+
   it("shows image assets from linked issues below the item description", async () => {
     const { container, root } = await renderItemPage(itemDetail(), [
       {

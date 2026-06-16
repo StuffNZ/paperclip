@@ -9,6 +9,7 @@ import {
   INTERNAL_FIELD_KEYS,
   itemHasChangedNotice,
   normalizePipelineChildRows,
+  splitPipelineItemFields,
 } from "./pipeline-item-detail";
 
 const stages: PipelineStage[] = [
@@ -170,6 +171,32 @@ describe("pipeline item detail helpers", () => {
     for (const key of INTERNAL_FIELD_KEYS) {
       expect(displayed.some((field) => field.key === key)).toBe(false);
     }
+  });
+
+  it("splits short sidebar fields from long main-pane fields without relying on key names", () => {
+    const displayed = displayPipelineItemFields({
+      owner: "Launch team",
+      reviewerOpenQuestions: "1. Does the headline need a source?\n2. Should we include the rollout caveat?",
+      arbitraryLongText: "This is a long field from a dynamic pipeline schema. ".repeat(5),
+    });
+
+    expect(splitPipelineItemFields(displayed)).toEqual({
+      shortFields: [
+        { key: "owner", label: "Owner", value: "Launch team" },
+      ],
+      longFields: [
+        {
+          key: "reviewerOpenQuestions",
+          label: "Reviewer Open Questions",
+          value: "1. Does the headline need a source?\n2. Should we include the rollout caveat?",
+        },
+        {
+          key: "arbitraryLongText",
+          label: "Arbitrary Long Text",
+          value: "This is a long field from a dynamic pipeline schema. ".repeat(5),
+        },
+      ],
+    });
   });
 
   it("normalizes rollup-tree children responses into direct child rows", () => {
