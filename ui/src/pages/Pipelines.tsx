@@ -2058,6 +2058,12 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
               </div>
             )}
           </DetailSection>
+        </main>
+
+        <aside className="min-w-0 space-y-8">
+          <DetailSection title="Linked work">
+            <PipelineWorkReferences references={workReferences} />
+          </DetailSection>
 
           <DetailSection
             title={
@@ -2088,12 +2094,6 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
                 Open all {pieceNounPluralLabel} →
               </Link>
             ) : null}
-          </DetailSection>
-        </main>
-
-        <aside className="min-w-0 space-y-8">
-          <DetailSection title="Linked work">
-            <PipelineWorkReferences references={workReferences} />
           </DetailSection>
 
           <DetailSection title="Details">
@@ -2180,11 +2180,11 @@ function WaitingChildRow({
     <li>
       <Link
         to={`/pipelines/${row.case.pipelineId}/items/${row.case.id}`}
-        className="grid grid-cols-[18px_1fr_auto] items-center gap-3 py-2 text-sm hover:bg-muted/40"
+        className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-3 py-2 text-sm hover:bg-muted/40"
       >
         <GitBranch className="h-4 w-4 text-muted-foreground" />
         <span className="min-w-0">
-          <span className="block truncate font-medium text-foreground">{row.case.title}</span>
+          <span className="block font-medium text-foreground [overflow-wrap:anywhere]">{row.case.title}</span>
           {row.activeWork || liveDownstreamCount > 0 ? (
             <span className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
               {row.activeWork ? (
@@ -2199,7 +2199,7 @@ function WaitingChildRow({
             </span>
           ) : null}
         </span>
-        <span className="rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground">
+        <span className="shrink-0 rounded-sm border border-border px-2 py-0.5 text-xs text-muted-foreground">
           {humanizePipelineItemStatus(row.case.terminalKind ?? row.stage.kind)}
         </span>
       </Link>

@@ -390,6 +390,11 @@ describe("PipelineItemDetailView", () => {
     expect(container.textContent).toContain("Child outline");
     expect(container.textContent).toContain("2 nested items hidden");
     expect(container.textContent).toContain("Suggested moving to Review.");
+    const builtFromHeading = Array.from(container.querySelectorAll("aside h2"))
+      .find((heading) => heading.textContent === "Built from 1 item");
+    expect(builtFromHeading).not.toBeUndefined();
+    expect(Array.from(container.querySelectorAll("main h2")).map((heading) => heading.textContent))
+      .not.toContain("Built from 1 item");
     expect(mockIssueChatThreadRender).toHaveBeenCalledWith(expect.objectContaining({
       issueId: "issue-1",
       variant: "embedded",
