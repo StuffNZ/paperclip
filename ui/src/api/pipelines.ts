@@ -529,6 +529,8 @@ export const pipelinesApi = {
   ) => api.post<unknown>(`/cases/${caseId}/transition`, data),
   rerunCurrentStageAutomation: (caseId: string) =>
     api.post<unknown>(`/cases/${caseId}/automation/current-stage/rerun`, {}),
+  retryAutomation: (caseId: string, automationId: string) =>
+    api.post<unknown>(`/cases/${caseId}/automations/${automationId}/retry`, {}),
   ingestCasesBatch: (pipelineId: string, data: {
     items: Array<{
       caseKey?: string | null;

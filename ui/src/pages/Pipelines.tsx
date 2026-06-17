@@ -62,6 +62,7 @@ import { IssueChatThread } from "../components/IssueChatThread";
 import { MarkdownBody } from "../components/MarkdownBody";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { PipelineHealthBar } from "../components/PipelineHealthWarnings";
+import { PipelineLivenessBanner } from "../components/PipelineLivenessBanner";
 import { PipelineWorkReferences } from "../components/PipelineWorkReferences";
 import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { useCompany } from "../context/CompanyContext";
@@ -81,6 +82,7 @@ import { pieceNounPlural, readStageBreakdown } from "../lib/pipeline-breakdown";
 import { hasBlockingShortcutDialog, isKeyboardShortcutTextInputTarget } from "../lib/keyboardShortcuts";
 import { formatLearningEvent, groupLearningEventsByDay } from "../lib/pipeline-learnings";
 import { queryKeys } from "../lib/queryKeys";
+import { shouldDisableRerunForPermission, type LivenessRetryKind } from "../lib/pipeline-liveness";
 import { cn, formatNumber, relativeTime } from "../lib/utils";
 import { attachmentDownloadPath, attachmentFilename, attachmentOpenPath, isImageAttachment } from "../lib/issue-attachments";
 import { formatBytes } from "../lib/issue-output";
@@ -1633,6 +1635,7 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
   const [moveDialogOpen, setMoveDialogOpen] = useState(false);
   const [moveStageKey, setMoveStageKey] = useState("");
   const [reviewDecisionNote, setReviewDecisionNote] = useState("");
+  const [livenessRetryError, setLivenessRetryError] = useState<string | null>(null);
 
   const pipeline = useQuery({
     queryKey: queryKeys.pipelines.detail(pipelineId),
@@ -1776,6 +1779,32 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
     onError: () => pushToast({ title: "Could not re-run the stage automation", tone: "error" }),
   });
 
+  // Liveness banner retry. Targets the specific failed automation ledger when we
+  // know its id (e.g. permission-restored recovery), otherwise falls back to
+  // re-running the current stage's entry automation. Surfaces the API error
+  // inline so a 403/409 is never silently dropped.
+  const retryLiveness = useMutation({
+    mutationFn: (kind: LivenessRetryKind) => {
+      const automationId = detail?.liveness?.automation?.automationId ?? null;
+      if (kind === "automation" && automationId) {
+        return pipelinesApi.retryAutomation(caseId, automationId);
+      }
+      return pipelinesApi.rerunCurrentStageAutomation(caseId);
+    },
+    onMutate: () => setLivenessRetryError(null),
+    onSuccess: async () => {
+      await invalidateItem();
+      pushToast({ title: "Retry started", tone: "success" });
+    },
+    onError: (error: unknown) => {
+      const message = error instanceof ApiError && error.message
+        ? error.message
+        : "Could not retry. Please try again.";
+      setLivenessRetryError(message);
+      pushToast({ title: "Could not retry the automation", tone: "error" });
+    },
+  });
+
   const removeStage = useMemo(
     () => stages.find((stage) => stage.kind === "cancelled") ?? stages.find((stage) => stage.key === "cancelled") ?? null,
     [stages],
@@ -1897,6 +1926,9 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
   const banner = getPendingTransitionBannerState(detail.case, stageLookup);
   const statusLabel = humanizePipelineItemStatus(detail.case.terminalKind ?? detail.stage.kind);
   const stageAutomation = currentStageAutomation(detail.stage);
+  // Don't let the operator re-run automation into the same 403 — they must get
+  // the grant first. The banner's "Request access" path is the way out.
+  const rerunBlockedByPermission = shouldDisableRerunForPermission(detail.liveness);
   const childRows = normalizePipelineChildRows(children.data);
   const eventRows = events.data?.items ?? [];
   const activeWork = detail.activeWork ?? null;
@@ -1982,7 +2014,8 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem
-                  disabled={!stageAutomation || rerunCurrentStageAutomation.isPending}
+                  disabled={!stageAutomation || rerunCurrentStageAutomation.isPending || rerunBlockedByPermission}
+                  title={rerunBlockedByPermission ? "Permission still missing — request access first" : undefined}
                   onSelect={(event) => {
                     event.preventDefault();
                     rerunCurrentStageAutomation.mutate();
@@ -2080,7 +2113,14 @@ export function PipelineItemDetailView({ pipelineId, caseId }: { pipelineId: str
 
       {activeWork ? (
         <ActivePipelineWorkBanner activeWork={activeWork} />
-      ) : null}
+      ) : (
+        <PipelineLivenessBanner
+          liveness={detail.liveness}
+          onRetry={(kind) => retryLiveness.mutate(kind)}
+          retryPending={retryLiveness.isPending}
+          retryError={livenessRetryError}
+        />
+      )}
 
       {banner.visible ? (
         <section className="mb-5 flex flex-col gap-3 border-y border-border bg-muted/20 py-4 md:flex-row md:items-center md:justify-between">
