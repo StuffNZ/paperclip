@@ -9,6 +9,7 @@ import {
   companies,
   companyMemberships,
   createDb,
+  heartbeatRuns,
   issueWatchdogs,
   issues,
   principalPermissionGrants,
@@ -42,6 +43,7 @@ describeEmbeddedPostgres("issue watchdog routes", () => {
   afterEach(async () => {
     await db.delete(activityLog);
     await db.delete(issueWatchdogs);
+    await db.delete(heartbeatRuns);
     await db.delete(issues);
     await db.delete(agents);
     await db.delete(principalPermissionGrants);
@@ -53,11 +55,11 @@ describeEmbeddedPostgres("issue watchdog routes", () => {
     await tempDb?.cleanup();
   });
 
-  function createApp(companyId: string) {
+  function createApp(companyId: string, actor?: Record<string, unknown>) {
     const app = express();
     app.use(express.json());
     app.use((req, _res, next) => {
-      (req as any).actor = {
+      (req as any).actor = actor ?? {
         type: "board",
         userId: "cloud-user-1",
         companyIds: [companyId],
@@ -140,6 +142,37 @@ describeEmbeddedPostgres("issue watchdog routes", () => {
       originId: overrides.originId,
     });
     return id;
+  }
+
+  async function seedWatchdogRun(input: {
+    companyId: string;
+    watchdogAgentId: string;
+    watchedIssueId: string;
+    watchdogIssueId: string;
+  }) {
+    await db.insert(issueWatchdogs).values({
+      companyId: input.companyId,
+      issueId: input.watchedIssueId,
+      watchdogAgentId: input.watchdogAgentId,
+      watchdogIssueId: input.watchdogIssueId,
+      status: "active",
+    });
+    const runId = randomUUID();
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId: input.companyId,
+      agentId: input.watchdogAgentId,
+      status: "running",
+      contextSnapshot: {
+        issueId: input.watchdogIssueId,
+        taskWatchdog: {
+          watchedIssueId: input.watchedIssueId,
+          watchedIssueIdentifier: "WDOG-ROOT",
+          watchedIssueTitle: "Watched root",
+        },
+      },
+    });
+    return runId;
   }
 
   it("creates, updates, reads, lists, and removes an issue watchdog with activity logs", async () => {
@@ -251,6 +284,105 @@ describeEmbeddedPostgres("issue watchdog routes", () => {
       .from(activityLog)
       .where(eq(activityLog.entityId, res.body.id));
     expect(activityRows.map((row) => row.action)).toContain("issue.watchdog_created");
+  });
+
+  it("enforces persisted watchdog scope for issue mutations and child creation", async () => {
+    const companyId = await seedCompany();
+    const watchdogAgentId = await seedAgent(companyId, { name: "Scoped Watchdog" });
+    const watchedRootId = await seedIssue(companyId, { title: "Watched root", identifier: "WDOG-ROOT" });
+    const watchedChildId = await seedIssue(companyId, { title: "Watched child", parentId: watchedRootId });
+    const unrelatedRootId = await seedIssue(companyId, { title: "Unrelated root" });
+    const watchdogIssueId = await seedIssue(companyId, {
+      title: "Reusable watchdog issue",
+      assigneeAgentId: watchdogAgentId,
+    });
+    const runId = await seedWatchdogRun({
+      companyId,
+      watchdogAgentId,
+      watchedIssueId: watchedRootId,
+      watchdogIssueId,
+    });
+    const app = createApp(companyId, {
+      type: "agent",
+      agentId: watchdogAgentId,
+      companyId,
+      runId,
+      source: "agent_jwt",
+    });
+
+    const allowedPatch = await request(app)
+      .patch(`/api/issues/${watchedChildId}`)
+      .send({ title: "Watched child verified" });
+    expect(allowedPatch.status, JSON.stringify(allowedPatch.body)).toBe(200);
+    expect(allowedPatch.body.title).toBe("Watched child verified");
+
+    const watchdogIssuePatch = await request(app)
+      .patch(`/api/issues/${watchdogIssueId}`)
+      .send({ title: "Reusable watchdog issue completed" });
+    expect(watchdogIssuePatch.status, JSON.stringify(watchdogIssuePatch.body)).toBe(200);
+
+    const deniedPatch = await request(app)
+      .patch(`/api/issues/${unrelatedRootId}`)
+      .send({ title: "Out-of-scope mutation" });
+    expect(deniedPatch.status, JSON.stringify(deniedPatch.body)).toBe(403);
+    expect(deniedPatch.body.error).toBe("Task-watchdog runs can only mutate the watched issue subtree.");
+
+    const allowedChild = await request(app)
+      .post(`/api/issues/${watchedRootId}/children`)
+      .send({ title: "Allowed watched child" });
+    expect(allowedChild.status, JSON.stringify(allowedChild.body)).toBe(201);
+    expect(allowedChild.body.parentId).toBe(watchedRootId);
+
+    const deniedChild = await request(app)
+      .post(`/api/issues/${unrelatedRootId}/children`)
+      .send({ title: "Denied unrelated child" });
+    expect(deniedChild.status, JSON.stringify(deniedChild.body)).toBe(403);
+    expect(deniedChild.body.error).toBe("Task-watchdog runs can only mutate the watched issue subtree.");
+
+    const deniedWatchdogIssueChild = await request(app)
+      .post(`/api/issues/${watchdogIssueId}/children`)
+      .send({ title: "Denied watchdog issue child" });
+    expect(deniedWatchdogIssueChild.status, JSON.stringify(deniedWatchdogIssueChild.body)).toBe(403);
+
+    const allowedParentCreate = await request(app)
+      .post(`/api/companies/${companyId}/issues`)
+      .send({ title: "Allowed parent create", parentId: watchedChildId });
+    expect(allowedParentCreate.status, JSON.stringify(allowedParentCreate.body)).toBe(201);
+    expect(allowedParentCreate.body.parentId).toBe(watchedChildId);
+
+    const deniedParentCreate = await request(app)
+      .post(`/api/companies/${companyId}/issues`)
+      .send({ title: "Denied parent create", parentId: unrelatedRootId });
+    expect(deniedParentCreate.status, JSON.stringify(deniedParentCreate.body)).toBe(403);
+    expect(deniedParentCreate.body.error).toBe("Task-watchdog runs can only mutate the watched issue subtree.");
+  });
+
+  it("rejects watchdog interaction-resolution attempts outside the persisted watched subtree", async () => {
+    const companyId = await seedCompany();
+    const watchdogAgentId = await seedAgent(companyId, { name: "Interaction Watchdog" });
+    const watchedRootId = await seedIssue(companyId, { title: "Watched root" });
+    const unrelatedRootId = await seedIssue(companyId, { title: "Unrelated root" });
+    const watchdogIssueId = await seedIssue(companyId, { title: "Reusable watchdog issue" });
+    const runId = await seedWatchdogRun({
+      companyId,
+      watchdogAgentId,
+      watchedIssueId: watchedRootId,
+      watchdogIssueId,
+    });
+    const app = createApp(companyId, {
+      type: "agent",
+      agentId: watchdogAgentId,
+      companyId,
+      runId,
+      source: "agent_jwt",
+    });
+
+    const res = await request(app)
+      .post(`/api/issues/${unrelatedRootId}/interactions/${randomUUID()}/accept`)
+      .send({});
+
+    expect(res.status, JSON.stringify(res.body)).toBe(403);
+    expect(res.body.error).toBe("Task-watchdog runs can only mutate the watched issue subtree.");
   });
 
   it("rejects cross-company watched issues and watchdog agents", async () => {

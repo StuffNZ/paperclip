@@ -91,6 +91,10 @@ import {
   routineService,
   workProductService,
 } from "../services/index.js";
+import {
+  resolveTaskWatchdogMutationScope,
+  taskWatchdogScopeAllowsIssueMutation,
+} from "../services/task-watchdog-scope.js";
 import { logger } from "../middleware/logger.js";
 import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -1869,6 +1873,7 @@ export function issueRoutes(
       res.status(403).json({ error: "Issue is outside this actor's authorization boundary" });
       return false;
     }
+    if (!(await assertTaskWatchdogIssueMutationAllowed(req, res, issue))) return false;
     if (issue.assigneeAgentId === null) {
       return true;
     }
@@ -1924,6 +1929,76 @@ export function issueRoutes(
       });
     }
     return true;
+  }
+
+  async function assertTaskWatchdogIssueMutationAllowed(
+    req: Request,
+    res: Response,
+    issue: {
+      id: string;
+      companyId: string;
+      parentId?: string | null;
+    },
+    opts: { allowWatchdogIssue?: boolean } = {},
+  ) {
+    if (req.actor.type !== "agent") return true;
+    const scope = await resolveTaskWatchdogMutationScope(db, req.actor);
+    if (scope.kind === "none") return true;
+    const result = await taskWatchdogScopeAllowsIssueMutation(db, scope, issue, opts);
+    if (result.kind !== "invalid") return true;
+    res.status(403).json({
+      error: result.detail,
+      details: {
+        issueId: issue.id,
+        securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+      },
+    });
+    return false;
+  }
+
+  async function assertTaskWatchdogCreateIssueAllowed(
+    req: Request,
+    res: Response,
+    companyId: string,
+    parent: {
+      id: string;
+      companyId: string;
+      parentId?: string | null;
+    } | null,
+  ) {
+    if (req.actor.type !== "agent") return true;
+    const scope = await resolveTaskWatchdogMutationScope(db, req.actor);
+    if (scope.kind === "none") return true;
+    if (scope.kind === "invalid") {
+      res.status(403).json({
+        error: scope.detail,
+        details: {
+          securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+        },
+      });
+      return false;
+    }
+    if (!parent) {
+      res.status(403).json({
+        error: "Task-watchdog runs must create issues inside the watched issue subtree.",
+        details: {
+          companyId,
+          watchedIssueId: scope.watchedIssueId,
+          securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+        },
+      });
+      return false;
+    }
+    const result = await taskWatchdogScopeAllowsIssueMutation(db, scope, parent, { allowWatchdogIssue: false });
+    if (result.kind !== "invalid") return true;
+    res.status(403).json({
+      error: result.detail,
+      details: {
+        parentIssueId: parent.id,
+        securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+      },
+    });
+    return false;
   }
 
   function isStatusOnlyCheapRecoveryContext(contextSnapshot: unknown) {
@@ -4412,6 +4487,7 @@ export function issueRoutes(
     assertCompanyAccess(req, companyId);
     if (await assertLowTrustControlPlaneDenied(req, res, companyId, null)) return;
     assertNoAgentHostWorkspaceCommandMutation(req, collectIssueWorkspaceCommandPaths(req.body));
+    let createParent: Awaited<ReturnType<typeof svc.getById>> | null = null;
     if (req.actor.type === "agent" && !req.body.parentId) {
       const companyScopeDecision = await access.decide({
         actor: req.actor,
@@ -4424,13 +4500,14 @@ export function issueRoutes(
       }
     }
     if (req.actor.type === "agent" && req.body.parentId) {
-      const parent = await svc.getById(req.body.parentId);
-      if (!parent || parent.companyId !== companyId) {
+      createParent = await svc.getById(req.body.parentId);
+      if (!createParent || createParent.companyId !== companyId) {
         res.status(404).json({ error: "Parent issue not found" });
         return;
       }
-      if (!(await assertIssueReadAllowed(req, res, parent))) return;
+      if (!(await assertIssueReadAllowed(req, res, createParent))) return;
     }
+    if (!(await assertTaskWatchdogCreateIssueAllowed(req, res, companyId, createParent))) return;
     const normalizedAssigneeAgentId = await normalizeIssueAssigneeAgentReference(
       companyId,
       req.body.assigneeAgentId as string | null | undefined,
@@ -4579,6 +4656,7 @@ export function issueRoutes(
     }
     assertCompanyAccess(req, parent.companyId);
     if (!(await assertIssueReadAllowed(req, res, parent))) return;
+    if (!(await assertTaskWatchdogCreateIssueAllowed(req, res, parent.companyId, parent))) return;
     if (await assertLowTrustControlPlaneDenied(req, res, parent.companyId, parent)) return;
     assertNoAgentHostWorkspaceCommandMutation(req, collectIssueWorkspaceCommandPaths(req.body));
     const normalizedAssigneeAgentId = await normalizeIssueAssigneeAgentReference(
@@ -6259,6 +6337,11 @@ export function issueRoutes(
         return;
       }
       assertCompanyAccess(req, issue.companyId);
+      if (req.actor.type === "agent") {
+        if (!(await assertTaskWatchdogIssueMutationAllowed(req, res, issue, { allowWatchdogIssue: false }))) return;
+        res.status(403).json({ error: "Agent actors cannot resolve issue-thread interactions through this board-only route" });
+        return;
+      }
       assertBoard(req);
 
       const actor = getActorInfo(req);
@@ -6366,6 +6449,11 @@ export function issueRoutes(
         return;
       }
       assertCompanyAccess(req, issue.companyId);
+      if (req.actor.type === "agent") {
+        if (!(await assertTaskWatchdogIssueMutationAllowed(req, res, issue, { allowWatchdogIssue: false }))) return;
+        res.status(403).json({ error: "Agent actors cannot resolve issue-thread interactions through this board-only route" });
+        return;
+      }
       assertBoard(req);
 
       const actor = getActorInfo(req);
@@ -6422,6 +6510,11 @@ export function issueRoutes(
         return;
       }
       assertCompanyAccess(req, issue.companyId);
+      if (req.actor.type === "agent") {
+        if (!(await assertTaskWatchdogIssueMutationAllowed(req, res, issue, { allowWatchdogIssue: false }))) return;
+        res.status(403).json({ error: "Agent actors cannot resolve issue-thread interactions through this board-only route" });
+        return;
+      }
       assertBoard(req);
 
       const actor = getActorInfo(req);
@@ -6474,6 +6567,11 @@ export function issueRoutes(
         return;
       }
       assertCompanyAccess(req, issue.companyId);
+      if (req.actor.type === "agent") {
+        if (!(await assertTaskWatchdogIssueMutationAllowed(req, res, issue, { allowWatchdogIssue: false }))) return;
+        res.status(403).json({ error: "Agent actors cannot resolve issue-thread interactions through this board-only route" });
+        return;
+      }
       assertBoard(req);
 
       const actor = getActorInfo(req);
