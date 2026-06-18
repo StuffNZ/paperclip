@@ -989,6 +989,13 @@ function cleanPipelineIssueTitlePart(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+function formatMarkdownContextScalar(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value.length ? JSON.stringify(value) : "(empty string)";
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+}
+
 function buildPipelineAutomationIssueTitlePrefix(input: {
   pipeline: typeof pipelines.$inferSelect;
   case: typeof pipelineCases.$inferSelect;
@@ -1007,10 +1014,16 @@ function buildPipelineStageEntryPreamble(input: {
   case: typeof pipelineCases.$inferSelect;
   stage: typeof pipelineStages.$inferSelect;
 }) {
+  const pipelineName = formatMarkdownContextScalar(input.pipeline.name);
+  const pipelineKey = formatMarkdownContextScalar(input.pipeline.key);
+  const stageName = formatMarkdownContextScalar(input.stage.name);
+  const stageKey = formatMarkdownContextScalar(input.stage.key);
+  const caseTitle = formatMarkdownContextScalar(input.case.title);
+  const caseKey = formatMarkdownContextScalar(input.case.caseKey);
   return [
     "## Pipeline Stage Automation",
     "",
-    `You are running as part of pipeline "${input.pipeline.name}" (${input.pipeline.key}), stage "${input.stage.name}" (${input.stage.key}), for case "${input.case.title}" (${input.case.caseKey}). Complete the stage task in the User Task block below, then update the pipeline case according to the workflow instructions.`,
+    `You are running as part of pipeline ${pipelineName} (${pipelineKey}), stage ${stageName} (${stageKey}), for case ${caseTitle} (${caseKey}). Complete the stage task in the User Task block below, then update the pipeline case according to the workflow instructions.`,
     "",
     "## User Task",
     "",
@@ -1018,19 +1031,12 @@ function buildPipelineStageEntryPreamble(input: {
   ].join("\n");
 }
 
-function formatTechnicalContextValue(value: unknown): string {
-  if (value == null) return "";
-  if (typeof value === "string") return value.length ? value : "(empty string)";
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value);
-}
-
 function pipelineCaseFieldContextLines(fields: unknown) {
   if (!fields || typeof fields !== "object" || Array.isArray(fields) || !Object.keys(fields).length) {
     return ["- none"];
   }
   return Object.entries(fields as Record<string, unknown>)
-    .map(([key, value]) => `- ${key}: ${formatTechnicalContextValue(value)}`);
+    .map(([key, value]) => `- ${formatMarkdownContextScalar(key)}: ${formatMarkdownContextScalar(value)}`);
 }
 
 function buildPipelineCaseContextMarkdown(input: {
@@ -1061,16 +1067,16 @@ function buildPipelineCaseContextMarkdown(input: {
     "## Technical Context",
     "",
     `- case_id: ${input.case.id}`,
-    `- case_key: ${input.case.caseKey}`,
-    `- case_title: ${input.case.title}`,
+    `- case_key: ${formatMarkdownContextScalar(input.case.caseKey)}`,
+    `- case_title: ${formatMarkdownContextScalar(input.case.title)}`,
     `- case_version: ${input.case.version}`,
     `- pipeline_id: ${input.pipeline.id}`,
-    `- pipeline_key: ${input.pipeline.key}`,
+    `- pipeline_key: ${formatMarkdownContextScalar(input.pipeline.key)}`,
     `- stage_id: ${input.stage.id}`,
-    `- stage_key: ${input.stage.key}`,
-    `- stage_kind: ${input.stage.kind}`,
-    input.triggeringEventId ? `- triggering_event_id: ${input.triggeringEventId}` : null,
-    `- browser_link: ${contextPack.case.deepLink}`,
+    `- stage_key: ${formatMarkdownContextScalar(input.stage.key)}`,
+    `- stage_kind: ${formatMarkdownContextScalar(input.stage.kind)}`,
+    input.triggeringEventId ? `- triggering_event_id: ${formatMarkdownContextScalar(input.triggeringEventId)}` : null,
+    `- browser_link: ${formatMarkdownContextScalar(contextPack.case.deepLink)}`,
     "",
     "### Case Fields",
     "",
