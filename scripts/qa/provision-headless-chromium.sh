@@ -34,10 +34,20 @@ ENV_FILE="$PREFIX/pw-chromium-env.sh"
 
 log() { printf '\033[36m[provision]\033[0m %s\n' "$*" >&2; }
 
+for cmd in apt-cache apt-get dpkg-deb find grep sort paste; do
+  if ! command -v "$cmd" >/dev/null 2>&1; then
+    echo "ERROR: required command not found: $cmd" >&2
+    exit 1
+  fi
+done
+
 # Playwright 1.58 documented Chromium runtime packages for ubuntu24.04
 # (playwright-core/lib/server/registry/nativeDeps.js -> ubuntu24.04 chromium + a
 # few font packages so text actually paints). apt-cache --recurse expands the
 # full transitive closure from these roots.
+# NOTE: when bumping @playwright/test, re-derive this list from
+# node_modules/playwright-core/lib/server/registry/nativeDeps.js (ubuntu24.04
+# chromium entry) and update the version comment above.
 ROOTS=(
   libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64
   libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64
@@ -63,7 +73,7 @@ log "Downloading .debs into $DEBS (no root required)..."
   cd "$DEBS"
   dl=0; skip=0
   for p in "${CLOSURE[@]}"; do
-    if [ -n "$(ls "${p}_"*.deb 2>/dev/null)" ]; then dl=$((dl+1)); continue; fi
+    if compgen -G "${p}_*.deb" >/dev/null 2>&1; then dl=$((dl+1)); continue; fi
     if clean apt-get download "$p" >/dev/null 2>&1; then dl=$((dl+1)); else skip=$((skip+1)); fi
   done
   log "Downloaded/cached $dl, skipped $skip (virtual/unavailable)."
