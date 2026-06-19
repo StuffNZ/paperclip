@@ -125,6 +125,7 @@ const PLUGIN_TELEMETRY_FORBIDDEN_KEY_PARTS = new Set([
   "host",
   "domain",
 ]);
+const PLUGIN_TELEMETRY_FORBIDDEN_COMPACT_KEYS = new Set(["companyid", "userid", "hostname"]);
 
 type PluginTelemetryDimensionValue = string | number | boolean;
 
@@ -157,9 +158,9 @@ function assertSafePluginTelemetryDimensionKey(key: string): void {
   const normalisedKey = normaliseTelemetryKey(key);
   const parts = normalisedKey.split("_");
   const forbidden = Array.from(PLUGIN_TELEMETRY_FORBIDDEN_KEY_PARTS).find((part) =>
-    parts.includes(part) || normalisedKey.includes(part),
+    parts.includes(part),
   );
-  if (forbidden) {
+  if (forbidden || PLUGIN_TELEMETRY_FORBIDDEN_COMPACT_KEYS.has(normalisedKey)) {
     throw new Error(
       `Plugin telemetry dimension "${key}" is not allowed; send private identifiers through privateRefs so the host can hash them.`,
     );

@@ -132,6 +132,29 @@ describe("plugin telemetry bridge", () => {
     expect(track).not.toHaveBeenCalled();
   });
 
+  it("allows safe dimension keys that contain sensitive substrings inside unrelated words", async () => {
+    const track = vi.fn();
+    mockGetTelemetryClient.mockReturnValue({ track });
+    const services = createTelemetryServices();
+
+    await services.telemetry.track({
+      eventName: "sync_completed",
+      dimensions: {
+        script_type: "manual",
+        zip_code: "enabled",
+        description_mode: "summary",
+        hidden: true,
+      },
+    });
+
+    expect(track).toHaveBeenCalledWith("plugin.linear.sync_completed", {
+      script_type: "manual",
+      zip_code: "enabled",
+      description_mode: "summary",
+      hidden: true,
+    });
+  });
+
   it("rejects suspicious dimension values before telemetry egress", async () => {
     const track = vi.fn();
     mockGetTelemetryClient.mockReturnValue({ track });
