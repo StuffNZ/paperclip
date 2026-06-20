@@ -723,7 +723,7 @@ export function CompanyEnvironments() {
           <DialogHeader className="border-b border-border/60 px-6 pb-4 pr-12 pt-6">
             <DialogTitle>{editingEnvironmentId ? "Edit environment" : "Add environment"}</DialogTitle>
             <DialogDescription>
-              Configure a reusable execution target in a centered modal instead of editing inline on the page.
+              Configure a reusable execution target for your agents.
             </DialogDescription>
           </DialogHeader>
 
