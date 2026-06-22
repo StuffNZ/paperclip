@@ -182,7 +182,7 @@ describe("GitHub external object provider", () => {
         providerKey: "github",
         objectType: "pull_request",
         externalId: "acme/app#pull/42",
-        displayKey: "GitHub PR",
+        displayKey: "Github Pull Request",
         iconKey: "github",
         displayTitle: "Acme/App#42",
       }),
@@ -190,7 +190,7 @@ describe("GitHub external object provider", () => {
         providerKey: "github",
         objectType: "issue",
         externalId: "acme/app#issues/7",
-        displayKey: "GitHub Issue",
+        displayKey: "Github Issue",
         iconKey: "github",
         displayTitle: "Acme/App#7",
       }),
@@ -239,7 +239,7 @@ describe("GitHub external object provider", () => {
       ok: true,
       snapshot: expect.objectContaining({
         ...expected,
-        displayKey: "GitHub PR",
+        displayKey: "Github Pull Request",
         iconKey: "github",
         displayTitle: expect.stringContaining(String(body.title)),
         remoteVersion: "2026-04-24T01:02:03Z",
@@ -281,7 +281,7 @@ describe("GitHub external object provider", () => {
       ok: true,
       snapshot: expect.objectContaining({
         ...expected,
-        displayKey: "GitHub Issue",
+        displayKey: "Github Issue",
         iconKey: "github",
         data: expect.objectContaining({
           provider: "github",
@@ -330,7 +330,7 @@ describe("GitHub external object provider", () => {
     [
       "not-found",
       new Response("", { status: 404, headers: { etag: '"missing"' } }),
-      { ok: true, snapshot: expect.objectContaining({ displayKey: "GitHub PR", iconKey: "github", statusKey: "not_found", statusIconKey: "archive", statusCategory: "archived", statusTone: "muted" }) },
+      { ok: true, snapshot: expect.objectContaining({ displayKey: "Github Pull Request", iconKey: "github", statusKey: "not_found", statusIconKey: "archive", statusCategory: "archived", statusTone: "muted" }) },
     ],
   ])("maps %s responses to provider-safe results", async (_name, githubResponse, expected) => {
     const provider = createGitHubExternalObjectProvider({} as any, {

@@ -37,7 +37,7 @@ describe("MarkdownBody external object decoration", () => {
     "https://github.com/acme/web/pull/241": {
       providerKey: "github",
       objectType: "pull_request",
-      displayKey: "GitHub PR",
+      displayKey: "Github Pull Request",
       iconKey: "github",
       statusCategory: "succeeded",
       statusIconKey: "git-merge",
@@ -53,7 +53,7 @@ describe("MarkdownBody external object decoration", () => {
     expect(html).toContain('data-external-link="resolved"');
     expect(html).toContain('data-external-status="succeeded"');
     expect(html).toContain('data-external-liveness="fresh"');
-    expect(html).toContain('aria-label="GitHub PR Merged: Add external refs"');
+    expect(html).toContain('aria-label="Github Pull Request Merged: Add external refs"');
     expect(html).toContain("github.com/acme/web/pull/241");
   });
 

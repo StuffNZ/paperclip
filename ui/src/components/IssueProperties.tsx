@@ -37,7 +37,7 @@ import { IssueReferencePill } from "./IssueReferencePill";
 import { formatDate, formatDateTime, cn, projectUrl } from "../lib/utils";
 import { ExternalObjectPill } from "./ExternalObjectPill";
 import type { IssueExternalObjectGroup } from "../hooks/useIssueExternalObjects";
-import { externalObjectToneSeverity } from "../lib/external-objects";
+import { externalObjectIconForKey, externalObjectToneSeverity } from "../lib/external-objects";
 import { timeAgo } from "../lib/timeAgo";
 import { Button } from "@/components/ui/button";
 import { ToggleSwitch } from "@/components/ui/toggle-switch";
@@ -165,12 +165,49 @@ interface IssuePropertiesProps {
 const ISSUE_BLOCKER_SEARCH_LIMIT = 50;
 const ISSUE_PROPERTY_RELATION_PREVIEW_COUNT = 5;
 
-function PropertyRow({ label, children }: { label: string; children: React.ReactNode }) {
+function PropertyRow({
+  label,
+  children,
+  labelClassName,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+  labelClassName?: string;
+}) {
   return (
     <div className="flex items-start gap-3 py-1.5">
-      <span className="text-xs text-muted-foreground shrink-0 w-20 mt-0.5">{label}</span>
+      <span className={cn("text-xs text-muted-foreground shrink-0 w-20 mt-0.5", labelClassName)}>{label}</span>
       <div className="flex items-center gap-1.5 min-w-0 flex-1 flex-wrap">{children}</div>
     </div>
+  );
+}
+
+function sortExternalObjectGroups(groups: IssueExternalObjectGroup[]) {
+  return [...groups].sort((a, b) => {
+    const aTone = externalObjectToneSeverity(a.group.object?.statusTone);
+    const bTone = externalObjectToneSeverity(b.group.object?.statusTone);
+    return bTone - aTone;
+  });
+}
+
+function externalObjectRowLabel(groups: IssueExternalObjectGroup[] | undefined): React.ReactNode {
+  if (!groups || groups.length === 0) return "External objects";
+  const sorted = sortExternalObjectGroups(groups);
+  const primary = sorted[0]?.pill;
+  const displayKey = primary?.displayKey?.trim();
+  if (!primary || !displayKey) return "External objects";
+  const iconKey = primary.iconKey ?? null;
+  const allSameDisplay = sorted.every(({ pill }) =>
+    (pill.displayKey?.trim() ?? "") === displayKey && (pill.iconKey ?? null) === iconKey,
+  );
+  if (!allSameDisplay) return "External objects";
+
+  const Icon = externalObjectIconForKey(iconKey);
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1">
+      {Icon ? <Icon aria-hidden="true" className="h-3 w-3 shrink-0" /> : null}
+      <span className="truncate">{displayKey}</span>
+    </span>
   );
 }
 
@@ -2202,14 +2239,9 @@ export function IssueProperties({
             <span className="h-4 w-24 animate-pulse rounded bg-muted/40" />
           </PropertyRow>
         ) : externalObjects && externalObjects.length > 0 ? (
-          <PropertyRow label="External objects">
+          <PropertyRow label={externalObjectRowLabel(externalObjects)} labelClassName="w-32">
             <div className="flex flex-wrap items-center gap-1.5">
-              {[...externalObjects]
-                .sort((a, b) => {
-                  const aTone = externalObjectToneSeverity(a.group.object?.statusTone);
-                  const bTone = externalObjectToneSeverity(b.group.object?.statusTone);
-                  return bTone - aTone;
-                })
+              {sortExternalObjectGroups(externalObjects)
                 .map(({ pill, mentionCount, sourceLabels, group }) => (
                   <ExternalObjectPill
                     key={group.object?.id ?? `${pill.providerKey}:${pill.objectType}:${pill.url ?? "anon"}`}

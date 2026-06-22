@@ -1797,4 +1797,47 @@ describe("IssueProperties", () => {
 
     act(() => root.unmount());
   });
+
+  it("uses external object display metadata for the properties row label", async () => {
+    const root = renderProperties(container, {
+      issue: createIssue(),
+      childIssues: [],
+      onUpdate: vi.fn(),
+      inline: true,
+      externalObjects: [
+        {
+          mentionCount: 1,
+          sourceLabels: ["Description"],
+          pill: {
+            providerKey: "github",
+            objectType: "pull_request",
+            displayKey: "Github Pull Request",
+            iconKey: "github",
+            statusCategory: "succeeded",
+            statusIconKey: "git-merge",
+            statusLabel: "Merged",
+            liveness: "fresh",
+            displayTitle: "acme/web#241: Add rich object presentation metadata",
+            url: "https://github.com/acme/web/pull/241",
+          },
+          group: {
+            object: null,
+            mentions: [],
+            mentionCount: 1,
+            sourceLabels: ["Description"],
+          },
+        },
+      ],
+    });
+    await flush();
+
+    expect(container.textContent).toContain("Github Pull Request");
+    expect(container.textContent).toContain("Merged");
+    expect(container.textContent).not.toContain("External objects");
+    const label = Array.from(container.querySelectorAll("span"))
+      .find((span) => span.textContent === "Github Pull Request");
+    expect(label?.querySelector("svg")).toBeTruthy();
+
+    act(() => root.unmount());
+  });
 });

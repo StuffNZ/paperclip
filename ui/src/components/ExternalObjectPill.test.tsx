@@ -97,7 +97,7 @@ describe("ExternalObjectPill", () => {
         object={{
           providerKey: "github",
           objectType: "pull_request",
-          displayKey: "GitHub PR",
+          displayKey: "Github Pull Request",
           iconKey: "github",
           statusCategory: "succeeded",
           statusIconKey: "git-merge",
@@ -108,7 +108,7 @@ describe("ExternalObjectPill", () => {
         }}
       />,
     );
-    expect(html).toContain("GitHub PR");
+    expect(html).toContain("Github Pull Request");
     expect(html).toContain("Merged");
     expect(html).toContain("acme/web#241: Add rich object presentation metadata");
     expect(html).toContain('aria-label="GitHub pull request — Merged: acme/web#241: Add rich object presentation metadata"');
