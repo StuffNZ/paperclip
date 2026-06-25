@@ -34,11 +34,13 @@ import type {
 import {
   createSecretProviderConfigSchema,
   deriveProjectUrlKey,
+  dynamicSecretCommandSchema,
   envBindingSchema,
   isUuidLike,
   normalizeAgentUrlKey,
   secretProviderConfigPayloadSchema,
   secretProviderConfigDiscoveryPreviewSchema,
+  staticArgvSchema,
   updateSecretProviderConfigSchema,
 } from "@paperclipai/shared";
 import { conflict, forbidden, HttpError, notFound, unprocessable } from "../errors.js";
@@ -53,12 +55,14 @@ import type {
   RemoteSecretListResult,
   SecretProviderHealthCheck,
   SecretProviderModule,
+  SecretProviderRuntimeContext,
   SecretProviderVaultRuntimeConfig,
   SecretProviderWriteContext,
 } from "../secrets/types.js";
 import { isSecretProviderClientError } from "../secrets/types.js";
 import { authorizationService } from "./authorization.js";
 import { logActivity } from "./activity-log.js";
+import { instanceSettingsService } from "./instance-settings.js";
 
 const ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const SENSITIVE_ENV_KEY_RE =
@@ -70,6 +74,8 @@ const COMING_SOON_SECRET_PROVIDERS: ReadonlySet<SecretProvider> = new Set([
 ]);
 const EMPTY_STATIC_ARGV: string[] = [];
 const DEFAULT_DYNAMIC_SECRET_COMMAND_TIMEOUT_MS = 30_000;
+const REDACTED_DYNAMIC_SECRET_FIELD = "***REDACTED***";
+const DYNAMIC_SECRET_CONFIG_VERSION = 1;
 const dynamicSecretCache = new Map<string, { value: string; expiresAt: number }>();
 type DbTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 type SecretBindingDb = Pick<Db | DbTransaction, "select" | "delete" | "insert">;
@@ -276,7 +282,20 @@ type SecretResolutionErrorCode =
   | "dynamic_secret_command_failed"
   | "dynamic_secret_command_timeout"
   | "dynamic_secret_command_empty"
+  | "dynamic_secrets_disabled"
   | "provider_error";
+
+type DynamicSecretConfigPayload = {
+  kind: "dynamic_command_config";
+  version: 1;
+  dynamicCommand: DynamicSecretCommandConfig;
+};
+
+type DynamicSecretStaticArgvPayload = {
+  kind: "dynamic_binding_static_argv";
+  version: 1;
+  staticArgv: string[];
+};
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
@@ -311,6 +330,57 @@ function normalizeStaticArgv(value: unknown): string[] {
     });
   }
   return value;
+}
+
+function dynamicCommandSummary(config: DynamicSecretCommandConfig): DynamicSecretCommandConfig {
+  return {
+    provider: config.provider,
+    command: REDACTED_DYNAMIC_SECRET_FIELD,
+    ttlSeconds: config.ttlSeconds,
+  };
+}
+
+function staticArgvSummary(staticArgv: string[]) {
+  return staticArgv.map(() => REDACTED_DYNAMIC_SECRET_FIELD);
+}
+
+async function prepareEncryptedPayload(
+  value: DynamicSecretConfigPayload | DynamicSecretStaticArgvPayload,
+  context: SecretProviderWriteContext,
+) {
+  return getSecretProvider("local_encrypted").createSecret({
+    value: JSON.stringify(value),
+    externalRef: null,
+    providerConfig: null,
+    context,
+  });
+}
+
+async function resolveEncryptedPayload<T>(
+  material: Record<string, unknown> | null | undefined,
+  context: SecretProviderRuntimeContext,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  if (!material) {
+    throw unprocessable("Encrypted dynamic secret material is missing", {
+      code: "dynamic_secret_command_failed",
+    });
+  }
+  const raw = await getSecretProvider("local_encrypted").resolveVersion({
+    material,
+    externalRef: null,
+    providerConfig: null,
+    context,
+  });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw unprocessable("Encrypted dynamic secret material is invalid", {
+      code: "dynamic_secret_command_failed",
+    });
+  }
+  return parse(parsed);
 }
 
 function dynamicSecretHttpError(code: SecretResolutionErrorCode, message: string) {
@@ -432,6 +502,7 @@ function secretResolutionErrorCode(error: unknown): SecretResolutionErrorCode {
       case "dynamic_secret_command_failed":
       case "dynamic_secret_command_timeout":
       case "dynamic_secret_command_empty":
+      case "dynamic_secrets_disabled":
       case "provider_error":
         return details.code;
     }
@@ -466,6 +537,7 @@ function assertSelectableProviderConfig(config: {
 
 export function secretService(db: Db) {
   const authorization = authorizationService(db);
+  const instanceSettings = instanceSettingsService(db);
 
   type NormalizeEnvOptions = {
     strictMode?: boolean;
@@ -503,6 +575,15 @@ export function secretService(db: Db) {
         ),
       )
       .then((rows) => rows[0] ?? null);
+  }
+
+  async function assertDynamicSecretsEnabled() {
+    const experimental = await instanceSettings.getExperimental();
+    if (experimental.enableDynamicSecrets !== true) {
+      throw new HttpError(403, "Dynamic secrets are not enabled for this instance.", {
+        code: "dynamic_secrets_disabled",
+      });
+    }
   }
 
   async function getBinding(input: {
@@ -559,6 +640,96 @@ export function secretService(db: Db) {
       );
     }
     return binding;
+  }
+
+  async function resolveDynamicCommandConfig(secret: {
+    id: string;
+    companyId: string;
+    key: string;
+    latestVersion: number;
+  }): Promise<DynamicSecretCommandConfig> {
+    const versionRow = await getSecretVersion(secret.id, secret.latestVersion);
+    const payload = await resolveEncryptedPayload(
+      versionRow?.material as Record<string, unknown> | undefined,
+      {
+        companyId: secret.companyId,
+        secretId: secret.id,
+        secretKey: secret.key,
+        version: secret.latestVersion,
+      },
+      (value) => {
+        const record = asRecord(value);
+        if (record?.kind !== "dynamic_command_config" || record.version !== DYNAMIC_SECRET_CONFIG_VERSION) {
+          throw unprocessable("Encrypted dynamic secret config is invalid", {
+            code: "dynamic_secret_command_failed",
+          });
+        }
+        const parsed = dynamicSecretCommandSchema.safeParse(record.dynamicCommand);
+        if (!parsed.success) {
+          throw unprocessable("Encrypted dynamic secret config is invalid", {
+            code: "dynamic_secret_command_failed",
+          });
+        }
+        return parsed.data;
+      },
+    );
+    return payload;
+  }
+
+  async function resolveBindingStaticArgv(binding: SecretBindingRow): Promise<string[]> {
+    if (!binding.staticArgvMaterial) {
+      return normalizeStaticArgv(binding.staticArgv);
+    }
+    return resolveEncryptedPayload(
+      binding.staticArgvMaterial as Record<string, unknown>,
+      {
+        companyId: binding.companyId,
+        secretId: binding.secretId,
+        secretKey: "binding-static-argv",
+        version: 1,
+      },
+      (value) => {
+        const record = asRecord(value);
+        if (record?.kind !== "dynamic_binding_static_argv" || record.version !== DYNAMIC_SECRET_CONFIG_VERSION) {
+          throw unprocessable("Encrypted dynamic secret binding argv is invalid", {
+            code: "dynamic_secret_command_failed",
+          });
+        }
+        const parsed = staticArgvSchema.safeParse(record.staticArgv);
+        if (!parsed.success) {
+          throw unprocessable("Encrypted dynamic secret binding argv is invalid", {
+            code: "dynamic_secret_command_failed",
+          });
+        }
+        return parsed.data;
+      },
+    );
+  }
+
+  async function prepareStaticArgvForBinding(input: {
+    companyId: string;
+    secretId: string;
+    staticArgv: string[] | undefined;
+  }): Promise<{ summary: string[]; material: Record<string, unknown> | null }> {
+    const staticArgv = normalizeStaticArgv(input.staticArgv ?? EMPTY_STATIC_ARGV);
+    if (staticArgv.length === 0) return { summary: EMPTY_STATIC_ARGV, material: null };
+    const prepared = await prepareEncryptedPayload(
+      {
+        kind: "dynamic_binding_static_argv",
+        version: DYNAMIC_SECRET_CONFIG_VERSION,
+        staticArgv,
+      },
+      {
+        companyId: input.companyId,
+        secretKey: `binding-static-argv-${input.secretId}`,
+        secretName: "Dynamic secret binding static argv",
+        version: 1,
+      },
+    );
+    return {
+      summary: staticArgvSummary(staticArgv),
+      material: prepared.material,
+    };
   }
 
   async function recordAccessEvent(input: {
@@ -753,7 +924,8 @@ export function secretService(db: Db) {
       }
       const binding = await assertBindingContext(companyId, secret.id, bindingContext);
       if (secret.managedMode === "dynamic_command") {
-        if (providerId !== "host_command" || !secret.dynamicCommand) {
+        await assertDynamicSecretsEnabled();
+        if (providerId !== "host_command") {
           throw unprocessable("Dynamic secret is missing generator command config", {
             code: "dynamic_secret_command_failed",
           });
@@ -761,13 +933,19 @@ export function secretService(db: Db) {
         if (!binding) {
           throw unprocessable("Dynamic secret resolution requires a runtime binding", { code: "binding_missing" });
         }
+        const dynamicCommand = await resolveDynamicCommandConfig({
+          id: secret.id,
+          companyId: secret.companyId,
+          key: secret.key,
+          latestVersion: secret.latestVersion,
+        });
         const resolution = await resolveDynamicSecretValue({
           companyId,
           secret: {
             id: secret.id,
             key: secret.key,
             provider: providerId,
-            dynamicCommand: secret.dynamicCommand,
+            dynamicCommand,
           },
           binding,
           configPath,
@@ -854,7 +1032,7 @@ export function secretService(db: Db) {
     configPath: string | null;
     accessContext: SecretConsumerContext | undefined;
   }): Promise<RuntimeSecretResolution> {
-    const staticArgv = normalizeStaticArgv(input.binding.staticArgv);
+    const staticArgv = await resolveBindingStaticArgv(input.binding);
     const cacheKey = dynamicSecretCacheKey({ bindingId: input.binding.id, staticArgv });
     const now = Date.now();
     const cached = dynamicSecretCache.get(cacheKey);
@@ -1996,38 +2174,67 @@ export function secretService(db: Db) {
         throw unprocessable("Managed secrets require value");
       }
       if (managedMode === "dynamic_command") {
+        await assertDynamicSecretsEnabled();
         if (input.provider !== "host_command") {
           throw unprocessable("Dynamic command secrets require host_command provider");
         }
         if (!input.dynamicCommand) {
           throw unprocessable("Dynamic command secrets require generator command config");
         }
+        const dynamicCommand = input.dynamicCommand;
         if (input.value?.trim()) {
           throw unprocessable("Dynamic command secrets cannot set value");
         }
         if (input.externalRef?.trim()) {
           throw unprocessable("Dynamic command secrets cannot set externalRef");
         }
-        return db
-          .insert(companySecrets)
-          .values({
+        const prepared = await prepareEncryptedPayload(
+          {
+            kind: "dynamic_command_config",
+            version: DYNAMIC_SECRET_CONFIG_VERSION,
+            dynamicCommand,
+          },
+          {
             companyId,
-            key,
-            name: input.name,
-            provider: input.provider,
-            providerConfigId: input.providerConfigId ?? null,
-            status: "active",
-            managedMode,
-            externalRef: null,
-            dynamicCommand: input.dynamicCommand,
-            providerMetadata: input.providerMetadata ?? null,
-            latestVersion: 0,
-            description: input.description ?? null,
+            secretKey: key,
+            secretName: input.name,
+            version: 1,
+          },
+        );
+        return db.transaction(async (tx) => {
+          const inserted = await tx
+            .insert(companySecrets)
+            .values({
+              companyId,
+              key,
+              name: input.name,
+              provider: input.provider,
+              providerConfigId: input.providerConfigId ?? null,
+              status: "active",
+              managedMode,
+              externalRef: null,
+              dynamicCommand: dynamicCommandSummary(dynamicCommand),
+              providerMetadata: input.providerMetadata ?? null,
+              latestVersion: 1,
+              description: input.description ?? null,
+              createdByAgentId: actor?.agentId ?? null,
+              createdByUserId: actor?.userId ?? null,
+            })
+            .returning()
+            .then((rows) => rows[0]);
+          await tx.insert(companySecretVersions).values({
+            secretId: inserted.id,
+            version: 1,
+            material: prepared.material,
+            valueSha256: prepared.valueSha256,
+            fingerprintSha256: prepared.fingerprintSha256 ?? prepared.valueSha256,
+            providerVersionRef: prepared.providerVersionRef ?? null,
+            status: "current",
             createdByAgentId: actor?.agentId ?? null,
             createdByUserId: actor?.userId ?? null,
-          })
-          .returning()
-          .then((rows) => rows[0]);
+          });
+          return inserted;
+        });
       }
       const provider = getSecretProvider(input.provider);
       const providerConfig = await getSelectableRuntimeProviderConfig({
@@ -2419,6 +2626,7 @@ export function secretService(db: Db) {
     // an unbound generator is not yet attached to any hard-isolation
     // environment; the runtime resolver labels the bound posture per Stage 5.
     testDynamicCommand: async (input: {
+      companyId: string;
       command: string;
       staticArgv?: string[];
     }): Promise<{
@@ -2429,6 +2637,7 @@ export function secretService(db: Db) {
       message?: string;
     }> => {
       try {
+        await assertDynamicSecretsEnabled();
         const value = await runDynamicSecretCommand({
           command: input.command,
           staticArgv: normalizeStaticArgv(input.staticArgv ?? EMPTY_STATIC_ARGV),
@@ -2455,7 +2664,15 @@ export function secretService(db: Db) {
       label?: string | null;
       staticArgv?: string[];
     }) => {
-      await assertSecretInCompany(input.companyId, input.secretId);
+      const secret = await assertSecretInCompany(input.companyId, input.secretId);
+      if (secret.managedMode === "dynamic_command") {
+        await assertDynamicSecretsEnabled();
+      }
+      const staticArgvStorage = await prepareStaticArgvForBinding({
+        companyId: input.companyId,
+        secretId: input.secretId,
+        staticArgv: input.staticArgv,
+      });
       const existing = await db
         .select()
         .from(companySecretBindings)
@@ -2480,7 +2697,8 @@ export function secretService(db: Db) {
           versionSelector: String(input.versionSelector ?? "latest"),
           required: input.required ?? true,
           label: input.label ?? null,
-          staticArgv: input.staticArgv ?? EMPTY_STATIC_ARGV,
+          staticArgv: staticArgvStorage.summary,
+          staticArgvMaterial: staticArgvStorage.material,
         })
         .returning()
         .then((rows) => rows[0]);
@@ -2505,16 +2723,26 @@ export function secretService(db: Db) {
         required: boolean;
         label: string | null;
         staticArgv: string[];
+        staticArgvMaterial: Record<string, unknown> | null;
       }> = [];
       for (const ref of refs) {
-        await assertSecretInCompany(companyId, ref.secretId);
+        const secret = await assertSecretInCompany(companyId, ref.secretId);
+        if (secret.managedMode === "dynamic_command") {
+          await assertDynamicSecretsEnabled();
+        }
+        const staticArgvStorage = await prepareStaticArgvForBinding({
+          companyId,
+          secretId: ref.secretId,
+          staticArgv: ref.staticArgv,
+        });
         normalizedRefs.push({
           secretId: ref.secretId,
           configPath: ref.configPath,
           versionSelector: ref.versionSelector ?? "latest",
           required: ref.required ?? true,
           label: ref.label ?? null,
-          staticArgv: ref.staticArgv ?? EMPTY_STATIC_ARGV,
+          staticArgv: staticArgvStorage.summary,
+          staticArgvMaterial: staticArgvStorage.material,
         });
       }
 
@@ -2560,6 +2788,7 @@ export function secretService(db: Db) {
             required: ref.required,
             label: ref.label,
             staticArgv: ref.staticArgv,
+            staticArgvMaterial: ref.staticArgvMaterial,
           })),
         );
       });
@@ -2592,6 +2821,7 @@ export function secretService(db: Db) {
         configPath: string;
         versionSelector: SecretVersionSelector;
         staticArgv: string[];
+        staticArgvMaterial: Record<string, unknown> | null;
       }> = [];
       const pathPrefix = target.pathPrefix ?? "env";
       const bindingDb = options?.db ?? db;
@@ -2600,12 +2830,21 @@ export function secretService(db: Db) {
         if (!parsed.success) continue;
         const binding = canonicalizeBinding(parsed.data as EnvBinding);
         if (binding.type !== "secret_ref") continue;
-        await assertSecretInCompany(companyId, binding.secretId, bindingDb);
+        const secret = await assertSecretInCompany(companyId, binding.secretId, bindingDb);
+        if (secret.managedMode === "dynamic_command") {
+          await assertDynamicSecretsEnabled();
+        }
+        const staticArgvStorage = await prepareStaticArgvForBinding({
+          companyId,
+          secretId: binding.secretId,
+          staticArgv: binding.staticArgv,
+        });
         refs.push({
           secretId: binding.secretId,
           configPath: `${pathPrefix}.${key}`,
           versionSelector: binding.version,
-          staticArgv: binding.staticArgv ?? EMPTY_STATIC_ARGV,
+          staticArgv: staticArgvStorage.summary,
+          staticArgvMaterial: staticArgvStorage.material,
         });
       }
 
@@ -2631,6 +2870,7 @@ export function secretService(db: Db) {
             versionSelector: String(ref.versionSelector),
             required: true,
             staticArgv: ref.staticArgv,
+            staticArgvMaterial: ref.staticArgvMaterial,
           })),
         );
       };

@@ -322,6 +322,7 @@ export function secretRoutes(db: Db) {
         throw forbidden("Dynamic secrets are not enabled for this instance.");
       }
       const result = await svc.testDynamicCommand({
+        companyId,
         command: req.body.command,
         staticArgv: req.body.staticArgv,
       });

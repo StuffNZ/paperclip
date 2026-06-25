@@ -15,6 +15,7 @@ export const companySecretBindings = pgTable(
     required: boolean("required").notNull().default(true),
     label: text("label"),
     staticArgv: jsonb("static_argv").$type<string[]>().notNull().default([]),
+    staticArgvMaterial: jsonb("static_argv_material").$type<Record<string, unknown>>(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },

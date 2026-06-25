@@ -21,6 +21,7 @@ import { getEmbeddedPostgresTestSupport, startEmbeddedPostgresTestDatabase } fro
 import { awsSecretsManagerProvider } from "../secrets/aws-secrets-manager-provider.js";
 import { localEncryptedProvider } from "../secrets/local-encrypted-provider.js";
 import { SecretProviderClientError } from "../secrets/types.js";
+import { instanceSettingsService } from "../services/instance-settings.js";
 import { secretService } from "../services/secrets.js";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
@@ -48,6 +49,7 @@ describeEmbeddedPostgres("secretService", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    await instanceSettingsService(db).updateExperimental({ enableDynamicSecrets: false });
     await db.delete(activityLog);
     await db.delete(secretAccessEvents);
     await db.delete(companySecretBindings);
@@ -119,6 +121,10 @@ describeEmbeddedPostgres("secretService", () => {
     });
   }
 
+  async function enableDynamicSecrets() {
+    await instanceSettingsService(db).updateExperimental({ enableDynamicSecrets: true });
+  }
+
   it("rejects cross-company secret references during env normalization", async () => {
     const companyA = await seedCompany("A");
     const companyB = await seedCompany("B");
@@ -169,8 +175,27 @@ describeEmbeddedPostgres("secretService", () => {
     ).rejects.toThrow(/already exists/i);
   });
 
-  it("persists dynamic command secrets and operator static argv bindings without secret material", async () => {
+  it("rejects dynamic command secret creation when the experimental flag is disabled", async () => {
     const companyId = await seedCompany();
+    const svc = secretService(db);
+
+    await expect(
+      svc.create(companyId, {
+        name: `dynamic-disabled-${randomUUID()}`,
+        provider: "host_command",
+        managedMode: "dynamic_command",
+        dynamicCommand: {
+          provider: "host-command",
+          command: "/usr/local/bin/mint-github-token",
+          ttlSeconds: 3600,
+        },
+      }),
+    ).rejects.toThrow(/not enabled/i);
+  });
+
+  it("persists dynamic command secrets and operator static argv bindings as encrypted material", async () => {
+    const companyId = await seedCompany();
+    await enableDynamicSecrets();
     const svc = secretService(db);
     const secret = await svc.create(companyId, {
       name: `dynamic-${randomUUID()}`,
@@ -187,10 +212,10 @@ describeEmbeddedPostgres("secretService", () => {
       managedMode: "dynamic_command",
       provider: "host_command",
       externalRef: null,
-      latestVersion: 0,
+      latestVersion: 1,
       dynamicCommand: {
         provider: "host-command",
-        command: "/usr/local/bin/mint-github-token",
+        command: "***REDACTED***",
         ttlSeconds: 3600,
       },
     });
@@ -199,7 +224,8 @@ describeEmbeddedPostgres("secretService", () => {
       .select()
       .from(companySecretVersions)
       .where(eq(companySecretVersions.secretId, secret.id));
-    expect(versions).toHaveLength(0);
+    expect(versions).toHaveLength(1);
+    expect(JSON.stringify(versions[0]?.material)).not.toContain("mint-github-token");
 
     const binding = await svc.createBinding({
       companyId,
@@ -210,11 +236,14 @@ describeEmbeddedPostgres("secretService", () => {
       staticArgv: ["--installation", "12345"],
     });
 
-    expect(binding.staticArgv).toEqual(["--installation", "12345"]);
+    expect(binding.staticArgv).toEqual(["***REDACTED***", "***REDACTED***"]);
+    expect(JSON.stringify(binding.staticArgvMaterial)).not.toContain("--installation");
+    expect(JSON.stringify(binding.staticArgvMaterial)).not.toContain("12345");
   });
 
   it("resolves dynamic command secrets with a TTL cache and metadata-only task activity", async () => {
     const companyId = await seedCompany();
+    await enableDynamicSecrets();
     const issue = await seedIssue(companyId);
     const countFile = path.join(secretsTmpDir, `count-${randomUUID()}.txt`);
     const scriptPath = writeGeneratorScript("dynamic-success", `
@@ -279,8 +308,54 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
     expect(activityJson).not.toContain(scriptPath);
   });
 
+  it("fails closed at runtime when dynamic secrets are disabled after creation", async () => {
+    const companyId = await seedCompany();
+    await enableDynamicSecrets();
+    const countFile = path.join(secretsTmpDir, `disabled-count-${randomUUID()}.txt`);
+    const scriptPath = writeGeneratorScript("dynamic-disabled-runtime", `
+const { writeFileSync } = require("node:fs");
+writeFileSync(${JSON.stringify(countFile)}, "invoked");
+console.log("should-not-run");
+`);
+    const svc = secretService(db);
+    const secret = await svc.create(companyId, {
+      name: `dynamic-runtime-disabled-${randomUUID()}`,
+      provider: "host_command",
+      managedMode: "dynamic_command",
+      dynamicCommand: {
+        provider: "host-command",
+        command: process.execPath,
+        ttlSeconds: 60,
+      },
+    });
+    await svc.createBinding({
+      companyId,
+      secretId: secret.id,
+      targetType: "agent",
+      targetId: "agent-runtime-disabled",
+      configPath: "env.RUNTIME_TOKEN",
+      staticArgv: [scriptPath],
+    });
+    await instanceSettingsService(db).updateExperimental({ enableDynamicSecrets: false });
+
+    await expect(
+      svc.resolveAdapterConfigForRuntime(
+        companyId,
+        { env: { RUNTIME_TOKEN: { type: "secret_ref", secretId: secret.id } } },
+        {
+          consumerType: "agent",
+          consumerId: "agent-runtime-disabled",
+          actorType: "system",
+          actorId: "system",
+        },
+      ),
+    ).rejects.toThrow(/not enabled/i);
+    expect(() => readFileSync(countFile, "utf8")).toThrow();
+  });
+
   it("fails closed for dynamic command error, timeout, and empty output", async () => {
     const companyId = await seedCompany();
+    await enableDynamicSecrets();
     const svc = secretService(db);
     const previousTimeout = process.env.PAPERCLIP_DYNAMIC_SECRET_COMMAND_TIMEOUT_MS;
     process.env.PAPERCLIP_DYNAMIC_SECRET_COMMAND_TIMEOUT_MS = "50";
@@ -341,7 +416,8 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
   });
 
   it("dry-runs a dynamic generator without returning the value", async () => {
-    await seedCompany();
+    const companyId = await seedCompany();
+    await enableDynamicSecrets();
     const svc = secretService(db);
     const scriptPath = writeGeneratorScript(
       "dynamic-test-ok",
@@ -349,6 +425,7 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
     );
 
     const ok = await svc.testDynamicCommand({
+      companyId,
       command: process.execPath,
       staticArgv: [scriptPath, "--installation", "999"],
     });
@@ -362,6 +439,7 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
       "process.stderr.write('boom'); process.exit(2);",
     );
     const failure = await svc.testDynamicCommand({
+      companyId,
       command: process.execPath,
       staticArgv: [failing],
     });
@@ -373,6 +451,7 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
 
   it("threads operator static argv from env bindings into binding rows", async () => {
     const companyId = await seedCompany();
+    await enableDynamicSecrets();
     const svc = secretService(db);
     const secret = await svc.create(companyId, {
       name: `dynamic-binding-${randomUUID()}`,
@@ -403,7 +482,9 @@ console.log("minted-" + count + ":" + process.argv.slice(2).join("|"));
       .from(companySecretBindings)
       .where(eq(companySecretBindings.targetId, "agent-argv"));
     expect(bindings).toHaveLength(1);
-    expect(bindings[0]?.staticArgv).toEqual(["--installation", "12345"]);
+    expect(bindings[0]?.staticArgv).toEqual(["***REDACTED***", "***REDACTED***"]);
+    expect(JSON.stringify(bindings[0]?.staticArgvMaterial)).not.toContain("--installation");
+    expect(JSON.stringify(bindings[0]?.staticArgvMaterial)).not.toContain("12345");
   });
 
   it("syncs top-level secret refs idempotently", async () => {
