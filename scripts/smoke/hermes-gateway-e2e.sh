@@ -690,7 +690,11 @@ assert_stop_behavior_if_deterministic() {
 
   log "probing /stop behavior (mode=${HERMES_STOP_ASSERT})"
   gateway_request "POST" "/v1/runs" "$payload" "${HERMES_SMOKE_DIAG_DIR}/stop-run-create.json"
-  assert_status "200"
+  if [[ "$RESPONSE_CODE" != "200" && "$RESPONSE_CODE" != "202" ]]; then
+    redact_text "$RESPONSE_BODY" >&2
+    echo >&2
+    fail "expected HTTP 200 or 202, got HTTP ${RESPONSE_CODE}"
+  fi
   STOP_RUN_ID="$(jq -r '.run_id // .runId // .id // empty' <<<"$RESPONSE_BODY")"
   [[ -n "$STOP_RUN_ID" ]] || fail "stop test run creation did not return run id"
 
