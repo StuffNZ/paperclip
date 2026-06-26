@@ -24,6 +24,12 @@ jobs:
       PORT: "3100"
       PAPERCLIP_API_URL: http://127.0.0.1:3100
       PAPERCLIP_AUTH_HEADER: Bearer local-trusted-hermes-smoke
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
       HERMES_SMOKE_RUN_SUFFIX: gh-${{ github.run_id }}-${{ github.run_attempt }}
       HERMES_CONTAINER_NAME: paperclip-hermes-gateway-smoke-gh-${{ github.run_id }}-${{ github.run_attempt }}
       HERMES_SMOKE_NETWORK: host

@@ -21,6 +21,11 @@ and the non-loopback HTTP guard.
 
 - Set the Hermes gateway key with `HERMES_GATEWAY_API_KEY` or `API_SERVER_KEY`.
   The scripts print only `sha256=<prefix>` and length for secret identifiers.
+- Set at least one Hermes inference provider key on the host before running the
+  Docker E2E smoke. The script passes through set values for
+  `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+  `GOOGLE_API_KEY`, and `MISTRAL_API_KEY`, and logs only the provider env var
+  names.
 - Board/operator auth is required through `PAPERCLIP_AUTH_HEADER`,
   `PAPERCLIP_COOKIE`, or a board-capable `PAPERCLIP_API_KEY`.
 - Diagnostic files are redacted before they are written, except the join output

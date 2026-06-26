@@ -54,6 +54,14 @@ RUN_TIMEOUT_SEC="${RUN_TIMEOUT_SEC:-420}"
 CASE_TIMEOUT_SEC="${CASE_TIMEOUT_SEC:-420}"
 GATEWAY_READY_TIMEOUT_SEC="${GATEWAY_READY_TIMEOUT_SEC:-90}"
 STRICT_CASES="${STRICT_CASES:-1}"
+HERMES_PROVIDER_ENV_KEYS=(
+  OPENROUTER_API_KEY
+  OPENAI_API_KEY
+  ANTHROPIC_API_KEY
+  GEMINI_API_KEY
+  GOOGLE_API_KEY
+  MISTRAL_API_KEY
+)
 
 print_usage() {
   cat <<'EOF'
@@ -161,6 +169,13 @@ redact_text() {
     "${PAPERCLIP_API_KEY:-}" \
     "${PAPERCLIP_AUTH_HEADER:-}" \
     "${PAPERCLIP_COOKIE:-}"; do
+    if [[ -n "$secret" ]]; then
+      text="${text//$secret/[redacted len=${#secret}]}"
+    fi
+  done
+  local key
+  for key in "${HERMES_PROVIDER_ENV_KEYS[@]}"; do
+    secret="${!key-}"
     if [[ -n "$secret" ]]; then
       text="${text//$secret/[redacted len=${#secret}]}"
     fi
@@ -488,6 +503,19 @@ start_container() {
     -v "${HERMES_SMOKE_STATE_DIR}/hermes-home:/home/hermes/.hermes"
     -v "${HERMES_SMOKE_STATE_DIR}/workspace:/home/hermes/workspace"
   )
+  local provider_key
+  local provider_keys=()
+  for provider_key in "${HERMES_PROVIDER_ENV_KEYS[@]}"; do
+    if [[ -n "${!provider_key-}" ]]; then
+      args+=(-e "${provider_key}=${!provider_key}")
+      provider_keys+=("$provider_key")
+    fi
+  done
+  if [[ ${#provider_keys[@]} -gt 0 ]]; then
+    log "passing Hermes inference provider env keys: ${provider_keys[*]}"
+  else
+    warn "no Hermes inference provider env keys set; direct run will fail unless Hermes state config already has a provider"
+  fi
   if [[ -n "$HERMES_SMOKE_NETWORK" ]]; then
     args+=(--network "$HERMES_SMOKE_NETWORK")
   fi
@@ -843,17 +871,24 @@ assert_paperclip_wake_success() {
 }
 
 scan_diagnostics_for_secret_leaks() {
-  [[ -n "$HERMES_GATEWAY_API_KEY" ]] || return
   log "scanning diagnostics for raw secret leaks"
+  local secrets=()
+  [[ -n "$HERMES_GATEWAY_API_KEY" ]] && secrets+=("$HERMES_GATEWAY_API_KEY")
+  [[ -n "$AGENT_API_KEY" ]] && secrets+=("$AGENT_API_KEY")
+  local key
+  for key in "${HERMES_PROVIDER_ENV_KEYS[@]}"; do
+    [[ -n "${!key-}" ]] && secrets+=("${!key}")
+  done
+  [[ ${#secrets[@]} -gt 0 ]] || return
   local file
   while IFS= read -r file; do
     [[ "$file" == "$JOIN_OUTPUT_FILE" ]] && continue
-    if grep -Fq "$HERMES_GATEWAY_API_KEY" "$file"; then
-      fail "raw Hermes gateway API key leaked in diagnostics file ${file}"
-    fi
-    if [[ -n "$AGENT_API_KEY" ]] && grep -Fq "$AGENT_API_KEY" "$file"; then
-      fail "raw Paperclip agent API key leaked in diagnostics file ${file}"
-    fi
+    local secret
+    for secret in "${secrets[@]}"; do
+      if grep -Fq "$secret" "$file"; then
+        fail "raw secret leaked in diagnostics file ${file}"
+      fi
+    done
   done < <(find "$HERMES_SMOKE_DIAG_DIR" -type f -print)
 }
 
