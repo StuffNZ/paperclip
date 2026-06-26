@@ -99,6 +99,16 @@ jobs:
             "$PAPERCLIP_API_URL/api/companies" \
             | tee "$RUNNER_TEMP/paperclip-company.json"
           jq '{id,name,issuePrefix,status}' "$RUNNER_TEMP/paperclip-company.json"
+          company_id="$(jq -r '.id' "$RUNNER_TEMP/paperclip-company.json")"
+          echo "COMPANY_ID=$company_id" >> "$GITHUB_ENV"
+          curl -fsS \
+            -X POST \
+            -H "Authorization: $PAPERCLIP_AUTH_HEADER" \
+            -H "Content-Type: application/json" \
+            --data '{"name":"Hermes Smoke CEO","role":"ceo","title":"Chief Executive Officer","adapterType":"process","adapterConfig":{"command":"echo","args":["hermes smoke ceo"]},"budgetMonthlyCents":0}' \
+            "$PAPERCLIP_API_URL/api/companies/$company_id/agents" \
+            | tee "$RUNNER_TEMP/paperclip-ceo-agent.json"
+          jq '{id,name,role,status,adapterType}' "$RUNNER_TEMP/paperclip-ceo-agent.json"
 
       - name: Run Hermes gateway Docker E2E smoke
         run: |
@@ -132,6 +142,7 @@ jobs:
             ${{ runner.temp }}/paperclip-server.log
             ${{ runner.temp }}/paperclip-health.json
             ${{ runner.temp }}/paperclip-company.json
+            ${{ runner.temp }}/paperclip-ceo-agent.json
             ${{ runner.temp }}/hermes-gateway-e2e.log
             ${{ env.HERMES_SMOKE_DIAG_DIR }}/
           retention-days: 14
