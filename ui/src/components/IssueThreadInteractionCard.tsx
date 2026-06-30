@@ -987,7 +987,7 @@ function AskUserQuestionsCard({
         <div className="rounded-2xl border border-amber-300/70 bg-amber-50/85 p-4 text-sm leading-6 text-amber-950 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
           <div className="flex items-center gap-2 font-semibold">
             <AlertTriangle className="h-4 w-4" />
-            Questions expired by comment
+            {questions.length === 1 ? "Question expired by comment" : "Questions expired by comment"}
           </div>
           <p className="mt-1">
             A later board/user comment superseded this question request. Create a fresh request if answers are still needed.

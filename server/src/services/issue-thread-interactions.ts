@@ -1277,25 +1277,54 @@ export function issueThreadInteractionService(db: Db) {
 
       const rowById = new Map(rows.map((row) => [row.id, row] as const));
       for (const { comment, rowIds } of supersededByComment.values()) {
-        for (const rowId of rowIds) {
-          const row = rowById.get(rowId);
-          if (!row) continue;
-          const [updated] = await db
+        const commentRows = rowIds
+          .map((rowId) => rowById.get(rowId))
+          .filter((row): row is IssueThreadInteractionRow => Boolean(row));
+        const questionRowIds = commentRows
+          .filter((row) => row.kind === "ask_user_questions")
+          .map((row) => row.id);
+        const confirmationRowIds = commentRows
+          .filter((row) => isRequestConfirmationLikeKind(row.kind))
+          .map((row) => row.id);
+
+        if (questionRowIds.length > 0) {
+          const [sampleQuestionRow] = commentRows.filter((row) => row.kind === "ask_user_questions");
+          const updatedRows = await db
             .update(issueThreadInteractions)
             .set({
               status: "expired",
-              result: buildSupersededByCommentResult(row, comment.id),
+              result: buildSupersededByCommentResult(sampleQuestionRow, comment.id),
               resolvedByAgentId: null,
               resolvedByUserId: comment.authorUserId,
               resolvedAt: now,
               updatedAt: now,
             })
             .where(and(
-              eq(issueThreadInteractions.id, row.id),
+              inArray(issueThreadInteractions.id, questionRowIds),
               eq(issueThreadInteractions.status, "pending"),
             ))
             .returning();
-          if (updated) expired.push(hydrateInteraction(updated));
+          expired.push(...updatedRows.map(hydrateInteraction));
+        }
+
+        if (confirmationRowIds.length > 0) {
+          const [sampleConfirmationRow] = commentRows.filter((row) => isRequestConfirmationLikeKind(row.kind));
+          const updatedRows = await db
+            .update(issueThreadInteractions)
+            .set({
+              status: "expired",
+              result: buildSupersededByCommentResult(sampleConfirmationRow, comment.id),
+              resolvedByAgentId: null,
+              resolvedByUserId: comment.authorUserId,
+              resolvedAt: now,
+              updatedAt: now,
+            })
+            .where(and(
+              inArray(issueThreadInteractions.id, confirmationRowIds),
+              eq(issueThreadInteractions.status, "pending"),
+            ))
+            .returning();
+          expired.push(...updatedRows.map(hydrateInteraction));
         }
       }
 

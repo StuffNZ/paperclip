@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ComponentProps, ReactNode } from "react";
+import { act as reactAct, type ComponentProps, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,11 @@ let container: HTMLDivElement | null = null;
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 async function act(callback: () => void | Promise<void>) {
+  if (typeof reactAct === "function") {
+    await reactAct(callback);
+    return;
+  }
+
   let result: void | Promise<void> = undefined;
   flushSync(() => {
     result = callback();
@@ -202,6 +207,22 @@ describe("IssueThreadInteractionCard", () => {
     expect(jumpLink?.getAttribute("href")).toBe(
       "#comment-22222222-2222-4222-8222-222222222222",
     );
+  });
+
+  it("uses singular copy for expired single-question interactions", () => {
+    const [question] = commentExpiredAskUserQuestionsInteraction.payload.questions;
+    const host = renderCard({
+      interaction: {
+        ...commentExpiredAskUserQuestionsInteraction,
+        payload: {
+          ...commentExpiredAskUserQuestionsInteraction.payload,
+          questions: [question],
+        },
+      },
+    });
+
+    expect(host.textContent).toContain("Question expired by comment");
+    expect(host.textContent).not.toContain("Questions expired by comment");
   });
 
   it("makes child tasks explicit in suggested task trees", () => {
