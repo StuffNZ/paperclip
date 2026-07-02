@@ -110,19 +110,27 @@ const manifest: PaperclipPluginManifestV1 = {
             type: "string",
             description: "Value of the `app` pod label on the paperclip-server pods. Default: paperclip-server.",
           },
+          timeoutMs: {
+            type: "number",
+            description:
+              "Whole-execute budget in ms (pod readiness wait + exec share it). Raise when fresh pods take longer than the ~15s default to become Ready.",
+          },
           adapters: {
-            type: "object",
+            type: "array",
             description:
               "Per-adapter-type overrides; authoritative for runtime image / envKeys / allowFqdns / probe / defaultEnv resolution.",
-            additionalProperties: {
+            items: {
               type: "object",
               properties: {
+                adapterType: { type: "string" },
+                enabled: { type: "boolean" },
                 runtimeImage: { type: "string" },
                 envKeys: { type: "array", items: { type: "string" } },
                 allowFqdns: { type: "array", items: { type: "string" } },
                 probeCommand: { type: "array", items: { type: "string" } },
                 defaultEnv: { type: "object", additionalProperties: { type: "string" } },
               },
+              required: ["adapterType"],
               additionalProperties: false,
             },
           },

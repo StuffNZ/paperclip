@@ -12,6 +12,11 @@ export const kubernetesProviderConfigSchema = z
     namespacePrefix: z.string().regex(/^[a-z0-9-]{1,32}$/).default("paperclip-"),
     companySlug: z.string().regex(/^[a-z0-9-]{1,32}$/).optional(),
 
+    // Read server-side (resolvePluginSandboxRpcTimeoutMs) as the whole-execute
+    // budget (readiness wait + exec share it). Declared here because config
+    // writes round-trip through this schema, which strips undeclared keys.
+    timeoutMs: z.number().int().positive().optional(),
+
     serverNamespace: z.string().regex(/^[a-z0-9-]{1,63}$/).default("paperclip"),
     serverPodAppLabel: z.string().min(1).default("paperclip-server"),
 
