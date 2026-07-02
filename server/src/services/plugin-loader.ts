@@ -96,6 +96,7 @@ const DEV_TSX_LOADER_PATH = path.resolve(__dirname, "../../../cli/node_modules/t
  */
 const ADAPTER_ENV_PASSTHROUGH = [
   "ANTHROPIC_API_KEY",
+  "GITHUB_TOKEN",
   "OPENAI_API_KEY",
   "GOOGLE_API_KEY",
   "GEMINI_API_KEY",
