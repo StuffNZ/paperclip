@@ -102,6 +102,30 @@ const manifest: PaperclipPluginManifestV1 = {
             description:
               "The adapter type that Jobs in this environment will run (e.g. `claude_local`, `codex_local`). Defaults to `claude_local`. Each environment is bound to one adapter; create multiple environments for different adapters.",
           },
+          serverNamespace: {
+            type: "string",
+            description: "Namespace the paperclip-server pods run in (egress allow-list target). Default: paperclip.",
+          },
+          serverPodAppLabel: {
+            type: "string",
+            description: "Value of the `app` pod label on the paperclip-server pods. Default: paperclip-server.",
+          },
+          adapters: {
+            type: "object",
+            description:
+              "Per-adapter-type overrides; authoritative for runtime image / envKeys / allowFqdns / probe / defaultEnv resolution.",
+            additionalProperties: {
+              type: "object",
+              properties: {
+                runtimeImage: { type: "string" },
+                envKeys: { type: "array", items: { type: "string" } },
+                allowFqdns: { type: "array", items: { type: "string" } },
+                probeCommand: { type: "array", items: { type: "string" } },
+                defaultEnv: { type: "object", additionalProperties: { type: "string" } },
+              },
+              additionalProperties: false,
+            },
+          },
           backend: {
             type: "string",
             enum: ["sandbox-cr", "job"],
